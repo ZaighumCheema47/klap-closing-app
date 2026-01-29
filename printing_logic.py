@@ -4,7 +4,7 @@ def trigger_thermal_print(branch, date_display, cash_sales, card_sales, fp_sales
     # Calculate Gross for the receipt
     gross_total = cash_sales + card_sales + fp_sales
     
-    # Formatting expense rows - using a shorter character limit to prevent pushing amounts right
+    # Formatting expense rows
     expenses_html = "".join([
         f"""
         <div class="row">
@@ -29,14 +29,14 @@ def trigger_thermal_print(branch, date_display, cash_sales, card_sales, fp_sales
             #receipt {{
                 visibility: visible !important;
                 position: absolute;
-                left: 2mm; /* Offset for left margin */
+                left: 3mm; 
                 top: 0;
             }}
         }}
 
         #receipt {{
             font-family: 'Arial Black', Gadget, sans-serif;
-            width: 60mm; /* Narrower width to prevent right-side chopping */
+            width: 58mm; /* Extra buffer to prevent right-side chopping */
             padding: 2mm;
             color: #000;
             background-color: #fff;
@@ -61,24 +61,22 @@ def trigger_thermal_print(branch, date_display, cash_sales, card_sales, fp_sales
         .row {{ 
             display: flex; 
             justify-content: space-between; 
-            align-items: flex-end; /* Align numbers to the bottom of the text line */
+            align-items: center; 
             margin-bottom: 4px;
             font-size: 14px;
         }}
         
-        .left {{ text-align: left; flex: 1; font-weight: 900; overflow: hidden; }}
-        .right {{ text-align: right; min-width: 20mm; font-weight: 900; }}
+        .left {{ text-align: left; flex: 1; font-weight: 900; }}
+        .right {{ text-align: right; min-width: 22mm; font-weight: 900; }}
         
-        /* Gross Sale Styling */
-        .gross-box {{
+        /* Specific styling for the Gross Amount Border */
+        .gross-val {{
             border-top: 2px solid #000;
             border-bottom: 2px solid #000;
-            margin: 5px 0;
-            padding: 3px 0;
-            display: flex;
-            justify-content: space-between;
-            font-size: 16px;
-            font-weight: 900;
+            padding: 2px 0;
+            display: inline-block;
+            min-width: 22mm;
+            text-align: right;
         }}
 
         .total-box {{ 
@@ -117,9 +115,9 @@ def trigger_thermal_print(branch, date_display, cash_sales, card_sales, fp_sales
         <div class="row"><span>CARD SALE</span><span class="right">{int(card_sales):,}</span></div>
         <div class="row"><span>FOODPANDA</span><span class="right">{int(fp_sales):,}</span></div>
         
-        <div class="gross-box">
+        <div class="row" style="margin-top: 8px; font-size: 16px;">
             <span>GROSS SALE</span>
-            <span>{int(gross_total):,}</span>
+            <span class="gross-val">{int(gross_total):,}</span>
         </div>
 
         <div class="line"></div>
