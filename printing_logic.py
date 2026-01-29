@@ -1,14 +1,12 @@
 import streamlit.components.v1 as components
 
 def trigger_thermal_print(branch, date_display, cash_sales, cc_tips, expenses, expected_cash):
-    # --- Expense rows: left description, right amount (negative style) ---
+
+    # Expense rows: description LEFT, amount RIGHT
     expenses_html = "".join([
         f"""
         <div class="row">
-            <div class="left">
-                <b>{e['Category']}</b><br>
-                <span class="desc">{e['Description']}</span>
-            </div>
+            <div class="left">{e['Description']}</div>
             <div class="right">({int(e['Amount']):,})</div>
         </div>
         """
@@ -25,8 +23,8 @@ def trigger_thermal_print(branch, date_display, cash_sales, cc_tips, expenses, e
                 left: 0;
                 top: 0;
                 width: 75mm;
-                padding: 0;
                 margin: 0;
+                padding: 0;
             }}
             @page {{ margin: 0; }}
         }}
@@ -34,8 +32,8 @@ def trigger_thermal_print(branch, date_display, cash_sales, cc_tips, expenses, e
         #receipt-box {{
             font-family: 'Courier New', monospace;
             font-size: 14px;
-            color: #000;
             padding: 12px;
+            color: #000;
         }}
 
         h1 {{
@@ -58,7 +56,7 @@ def trigger_thermal_print(branch, date_display, cash_sales, cc_tips, expenses, e
             display: flex;
             justify-content: space-between;
             align-items: flex-start;
-            margin-bottom: 6px;
+            margin-bottom: 4px;
         }}
 
         .left {{
@@ -71,11 +69,6 @@ def trigger_thermal_print(branch, date_display, cash_sales, cc_tips, expenses, e
             width: 30%;
             text-align: right;
             white-space: nowrap;
-        }}
-
-        .desc {{
-            font-size: 12px;
-            color: #444;
         }}
 
         .total {{
@@ -122,9 +115,7 @@ def trigger_thermal_print(branch, date_display, cash_sales, cc_tips, expenses, e
     </div>
 
     <script>
-        setTimeout(function() {{
-            window.print();
-        }}, 500);
+        setTimeout(function() {{ window.print(); }}, 500);
     </script>
     """
 
