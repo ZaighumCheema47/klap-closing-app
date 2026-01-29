@@ -103,7 +103,7 @@ st.divider()
 # CASH EXPENSES
 st.subheader("💸 Cash Expenses")
 
-predefined = ["Select Category", "Staff Food", "Cleaner", "Rickshaw/Fuel", "Pepsi/LPG", "Maintenance", "Utility Bill", "Other..."]
+predefined = ["Select Category", "Staff", "Rides", "Inventory", "Generator", "Bevrages", "Maintenance", "Utilities", "Cleaning", "Other..."]
 
 # Sequential Validation Flow
 cat_choice = st.selectbox(
