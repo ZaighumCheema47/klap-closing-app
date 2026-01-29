@@ -1,11 +1,11 @@
 import streamlit.components.v1 as components
 
 def trigger_thermal_print(branch, date_display, cash_sales, card_sales, fp_sales, cc_tips, expenses, expected_cash, closing_code):
-    # Formatting expense rows with maximum thickness
+    # Formatting expense rows
     expenses_html = "".join([
         f"""
         <div class="row">
-            <div class="left">{e['Description'][:20].upper()}</div>
+            <div class="left">{e['Description'][:18].upper()}</div>
             <div class="right">({int(e['Amount']):,})</div>
         </div>
         """
@@ -14,82 +14,85 @@ def trigger_thermal_print(branch, date_display, cash_sales, card_sales, fp_sales
 
     receipt_html = f"""
     <style>
+        /* Force browser to remove all default headers/footers and margins */
         @media print {{
-            body * {{ visibility: hidden; }}
-            #receipt, #receipt * {{ visibility: visible; }}
-            #receipt {{
-                position: absolute;
-                left: 0;
-                top: 0;
-                width: 80mm;
+            @page {{ 
+                margin: 0; 
+                size: 80mm auto; 
             }}
-            @page {{ margin: 0; size: 80mm auto; }}
+            body {{ 
+                margin: 0; 
+                padding: 0; 
+            }}
+            #receipt {{
+                visibility: visible !important;
+                position: absolute;
+                left: 3mm; /* Manual offset to stop left-side cutting */
+                top: 0;
+            }}
         }}
 
         #receipt {{
-            /* Using a thick-stroke Sans-Serif font for better thermal 'burn' */
-            font-family: 'Arial Black', 'Arial', sans-serif;
-            font-size: 15px; 
-            font-weight: 900; /* Maximum thickness */
-            line-height: 1.3;
-            width: 74mm;
+            font-family: 'Arial Black', Gadget, sans-serif;
+            width: 68mm; /* Reduced width to stay inside printable track */
             padding: 2mm;
-            color: #000000;
-            -webkit-print-color-adjust: exact;
+            color: #000;
+            background-color: #fff;
+            line-height: 1.2;
         }}
 
         h1 {{ 
-            text-align:center; 
-            margin:0; 
-            font-size: 32px; 
+            text-align: center; 
+            margin: 0; 
+            font-size: 28px; 
             font-weight: 900;
-            border-bottom: 3px solid #000;
-            margin-bottom: 5px;
+            border-bottom: 4px solid #000;
         }}
 
-        .center {{ text-align:center; margin:4px 0; font-weight: 900; }}
+        .center {{ text-align: center; margin: 2px 0; font-weight: 900; font-size: 14px; }}
         
-        /* Thicker dashed line */
         .line {{ 
             border-top: 3px dashed #000; 
-            margin: 12px 0; 
+            margin: 8px 0; 
         }}
         
         .row {{ 
             display: flex; 
             justify-content: space-between; 
             align-items: flex-start;
-            margin-bottom: 6px;
+            margin-bottom: 5px;
+            font-size: 15px;
         }}
         
-        .left {{ text-align: left; flex: 1; letter-spacing: 0.5px; }}
-        .right {{ text-align: right; min-width: 25mm; }}
+        .left {{ text-align: left; flex: 1; font-weight: 900; }}
+        .right {{ text-align: right; min-width: 22mm; font-weight: 900; }}
         
-        /* High-Visibility Box for Cash in Hand */
         .total-box {{ 
             border: 4px solid #000; 
-            padding: 10px; 
-            margin-top: 15px; 
+            padding: 8px; 
+            margin-top: 10px; 
             text-align: center;
         }}
+        
         .total-val {{ 
-            font-size: 30px; 
+            font-size: 28px; 
             font-weight: 900; 
         }}
 
         .section-title {{
             text-decoration: underline;
             font-size: 18px;
-            margin-bottom: 8px;
             display: block;
             text-align: center;
+            margin-bottom: 5px;
+            font-weight: 900;
         }}
     </style>
 
     <div id="receipt">
         <h1>KLAP</h1>
         <div class="center">
-            <span style="font-size: 20px;">{branch.upper()}</span><br>
+            <span style="font-size: 18px;">{branch.upper()}</span><br>
             DATE: {date_display}<br>
             ID: {closing_code}
         </div>
@@ -108,19 +111,19 @@ def trigger_thermal_print(branch, date_display, cash_sales, card_sales, fp_sales
 
         <div class="line"></div>
         <div class="total-box">
-            <div style="font-size: 18px; letter-spacing: 1px;">CASH IN HAND</div>
+            <div style="font-size: 16px;">CASH IN HAND</div>
             <div class="total-val">Rs. {int(expected_cash):,}</div>
         </div>
 
-        <div class="center" style="margin-top:20px; font-size: 14px;">
+        <div class="center" style="margin-top:15px; font-size: 12px;">
             *** END OF REPORT ***
         </div>
     </div>
 
     <script>
-        setTimeout(() => {{ 
-            window.print(); 
-        }}, 800);
+        window.onload = function() {{
+            setTimeout(() => {{ window.print(); }}, 500);
+        }};
     </script>
     """
     components.html(receipt_html, height=0)
