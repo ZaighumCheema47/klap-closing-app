@@ -25,20 +25,21 @@ def parse_money(val):
     return int(clean_val) if clean_val else 0
 
 def upsert_sales_data(branch_name, daily_id, date_str, cash, card, fp, gross):
-    """Saves only the sales breakdown to the 'Sales' worksheet"""
+    """Saves/Updates the 'Sales' worksheet with the daily breakdown"""
     if client:
         try:
             sheet_title = "KLAP DHA Branch" if "DHA" in branch_name else "KLAP Cantt Branch"
-            # Attempt to open the worksheet named 'Sales'
             spreadsheet = client.open(sheet_title)
+            
+            # Ensure 'Sales' worksheet exists
             try:
                 sales_sheet = spreadsheet.worksheet("Sales")
             except gspread.exceptions.WorksheetNotFound:
-                # Create it if it doesn't exist
                 sales_sheet = spreadsheet.add_worksheet(title="Sales", rows="100", cols="10")
-                sales_sheet.append_row(["ID", "Date", "Cash Sales", "Card Sales", "Foodpanda", "Gross Total"])
+                sales_sheet.append_row(["ID", "Date", "Cash", "Card", "Foodpanda", "Gross"])
 
             records = sales_sheet.get_all_values()
+            # Remove old record if re-submitting for same ID
             if len(records) > 1:
                 rows_to_delete = [i + 1 for i, row in enumerate(records) if row[0] == daily_id]
                 for idx in reversed(rows_to_delete):
@@ -51,7 +52,7 @@ def upsert_sales_data(branch_name, daily_id, date_str, cash, card, fp, gross):
     return False
 
 def upsert_closing(branch_name, custom_id, data_rows):
-    """Saves detailed expenses to the main sheet"""
+    """Saves/Updates the main detailed expense sheet"""
     if client:
         try:
             sheet_title = "KLAP DHA Branch" if "DHA" in branch_name else "KLAP Cantt Branch"
@@ -67,7 +68,7 @@ def upsert_closing(branch_name, custom_id, data_rows):
             sheet.append_rows(final_rows)
             return True
         except Exception as e:
-            st.error(f"Sheet Error: {e}")
+            st.error(f"Expense Sheet Error: {e}")
     return False
 
 # ---------- UI SETUP ----------
@@ -78,44 +79,40 @@ if "expenses" not in st.session_state:
 if "exp_form_key" not in st.session_state:
     st.session_state.exp_form_key = 0
 
-st.title("🍽️ KLAP Daily Closing")
+# --- TOP SEARCH BAR ---
+col_title, col_search = st.columns([4, 1])
+with col_title:
+    st.title("🍽️ KLAP Daily Closing")
 
-# --- SIDEBAR TOGGLE FOR RETRIEVAL ---
-with st.sidebar:
-    show_retrieval = st.checkbox("Toggle Retrieval Sidebar")
-    if show_retrieval:
-        st.header("🔍 Retrieve Past Closing")
-        search_id = st.text_input("Enter ID (e.g., DHA290126CR)").upper().strip()
-        if st.button("Load Data"):
+with col_search:
+    with st.popover("🔍 Search"):
+        search_id = st.text_input("ID (DHA290126CR)").upper().strip()
+        if st.button("Load Past Closing"):
             if client and search_id:
                 try:
                     target_sheet = "KLAP DHA Branch" if "DHA" in search_id else "KLAP Cantt Branch"
                     sheet = client.open(target_sheet).sheet1
                     records = sheet.get_all_values()
                     matched_rows = [r for r in records if r[0] == search_id]
-                    
                     if matched_rows:
-                        temp_expenses = []
-                        for row in matched_rows:
-                            if row[2] not in ["SALES_SUMMARY", "CC TIP"]:
-                                temp_expenses.append({
-                                    "Date": row[1], "Category": row[2],
-                                    "Description": row[3], "Amount": int(row[4]), "Bill": row[5]
-                                })
-                        st.session_state.expenses = temp_expenses
-                        st.success(f"Loaded {search_id}")
+                        st.session_state.expenses = [
+                            {"Date": r[1], "Category": r[2], "Description": r[3], "Amount": int(r[4]), "Bill": r[5]}
+                            for r in matched_rows if r[2] not in ["SALES_SUMMARY", "CC TIP"]
+                        ]
+                        st.success("Loaded!")
                         st.rerun()
                     else:
-                        st.error("ID not found.")
+                        st.error("Not found.")
                 except Exception as e:
-                    st.error(f"Search Error: {e}")
+                    st.error(f"Error: {e}")
 
+# Branch/Date Select
 col_branch, col_date = st.columns(2)
 branch = col_branch.selectbox("Select Branch", ["Cantt Branch", "DHA Branch"])
 date_selected = col_date.date_input("Closing Date", datetime.today())
 date_str_display = date_selected.strftime("%d-%m-%y")
 
-# Unique ID Generation
+# Internal ID Logic (No longer displayed)
 branch_prefix = "DHA" if "DHA" in branch else "CANTT"
 daily_id = f"{branch_prefix}{date_selected.strftime('%d%m%y')}CR"
 
@@ -142,7 +139,7 @@ elif gross > 0 and not mismatch:
 
 st.divider()
 
-# CASH EXPENSES
+# EXPENSE ENTRY
 st.subheader("💸 Add New Expense")
 predefined = ["Select Category", "Staff", "Rides", "Inventory", "Generator", "Bevrages", "Maintenance", "Utilities", "Cleaning", "Other..."]
 cat_choice = st.selectbox("1. Category", predefined, key=f"cat_{st.session_state.exp_form_key}")
@@ -163,27 +160,38 @@ if cat_choice != "Select Category":
                 st.rerun()
 
 st.divider()
-tip_status = st.radio("Were there any Credit Card Tips?", ["No", "Yes"], horizontal=True)
-cc_tips = parse_money(st.text_input("Tip Amount")) if tip_status == "Yes" else 0
 
+# Final Metrics
+tip_status = st.radio("Credit Card Tips?", ["No", "Yes"], horizontal=True)
+cc_tips = parse_money(st.text_input("Tip Amount")) if tip_status == "Yes" else 0
 total_exp = sum(e['Amount'] for e in st.session_state.expenses)
 expected_cash = cash - total_exp - cc_tips
 st.metric("Final Cash in Hand", f"PKR {int(expected_cash):,}")
 
+# --- CONFIRM & PRINT (Fixed variable names) ---
 if st.button("🖨️ Confirm & Print Closing", type="primary", use_container_width=True):
     if mismatch or gross == 0:
-        st.error("Verify Revenue Totals.")
+        st.error("Please ensure revenue totals are correct.")
     else:
-        # Prepare Data Rows
         rows = [[e['Date'], e['Category'], e['Description'], e['Amount'], e['Bill']] for e in st.session_state.expenses]
         rows.append([date_str_display, "SALES_SUMMARY", f"Gross:{gross}", gross, "N/A"])
         if cc_tips > 0:
             rows.append([date_str_display, "CC TIP", "Paid to staff", cc_tips, "No"])
             
-        # Double Save: Closing + Sales Worksheet
+        # Update both Detailed sheet and Sales sheet
         if upsert_closing(branch, daily_id, rows) and upsert_sales_data(branch, daily_id, date_str_display, cash, card, fp, gross):
-            st.success(f"Records updated for {daily_id}")
-            trigger_thermal_print(branch, date_str_display, cash, card, fp, cc_tips, st.session_state.expenses, expected_cash, daily_id)
+            st.success(f"Closing Successful! ID: {daily_id}")
+            trigger_thermal_print(
+                branch=branch,
+                date_display=date_str_display,
+                cash_sales=cash,
+                card_sales=card,
+                fp_sales=fp,
+                cc_tips=cc_tips,
+                expenses=st.session_state.expenses,
+                expected_cash=expected_cash,
+                closing_code=daily_id
+            )
             st.session_state.expenses = []
 
 st.divider()
