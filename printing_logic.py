@@ -14,7 +14,7 @@ def trigger_thermal_print(branch, date_display, cash_sales, card_sales, fp_sales
             #receipt {{ position: absolute; left: 0; top: 0; width: 58mm; }}
             @page {{ margin: 0; }}
         }}
-        #receipt {{ font-family: 'Courier New', monospace; font-size: 12px; width: 54mm; padding: 2mm; color: #000; }}
+        #receipt {{ font-family: 'Courier New', monospace; font-size: 10px; width: 54mm; padding: 2mm; color: #000; }}
         h1 {{ text-align:center; margin:0; font-size: 18px; }}
         .center {{ text-align:center; margin:2px 0; }}
         .line {{ border-top:1px dashed #000; margin:5px 0; }}
