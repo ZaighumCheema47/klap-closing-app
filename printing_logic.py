@@ -1,14 +1,16 @@
 import streamlit.components.v1 as components
 
 def trigger_thermal_print(
-    branch: str,
-    date_display: str,
-    cash_sales: int,
-    cc_tips: int,
-    expenses: list,
-    expected_cash: int
+    branch,
+    date_display,
+    cash_sales,
+    card_sales,
+    fp_sales,
+    expenses,
+    cc_tips,
+    expected_cash,
+    closing_code
 ):
-    # Description ONLY, amount right-aligned, negative style
     expenses_html = "".join([
         f"""
         <div class="row">
@@ -23,106 +25,58 @@ def trigger_thermal_print(
     <style>
         @media print {{
             body * {{ visibility: hidden; }}
-            #receipt-box, #receipt-box * {{ visibility: visible !important; }}
-            #receipt-box {{
+            #receipt, #receipt * {{ visibility: visible; }}
+            #receipt {{
                 position: absolute;
                 left: 0;
                 top: 0;
                 width: 75mm;
-                margin: 0;
-                padding: 0;
             }}
             @page {{ margin: 0; }}
         }}
 
-        #receipt-box {{
-            font-family: 'Courier New', monospace;
-            font-size: 14px;
-            padding: 12px;
-            color: #000;
+        #receipt {{
+            font-family: Courier New, monospace;
+            font-size: 13px;
+            padding: 10px;
         }}
 
-        h1 {{
-            text-align: center;
-            font-size: 26px;
-            margin: 0;
-        }}
-
-        .center {{
-            text-align: center;
-            margin: 6px 0;
-        }}
-
-        .line {{
-            border-top: 1px dashed #000;
-            margin: 8px 0;
-        }}
-
-        .row {{
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-            margin-bottom: 4px;
-        }}
-
-        .left {{
-            width: 70%;
-            text-align: left;
-            word-wrap: break-word;
-        }}
-
-        .right {{
-            width: 30%;
-            text-align: right;
-            white-space: nowrap;
-        }}
-
-        .total {{
-            text-align: center;
-            font-size: 30px;
-            margin-top: 4px;
-        }}
+        h1 {{ text-align:center; margin:0; }}
+        .center {{ text-align:center; margin:4px 0; }}
+        .line {{ border-top:1px dashed #000; margin:6px 0; }}
+        .row {{ display:flex; justify-content:space-between; }}
+        .right {{ text-align:right; }}
+        .total {{ font-size:28px; text-align:center; }}
     </style>
 
-    <div id="receipt-box">
+    <div id="receipt">
         <h1>KLAP</h1>
         <div class="center">
             <b>{branch.upper()}</b><br>
-            Date: {date_display}
+            {date_display}<br>
+            {closing_code}
         </div>
 
         <div class="line"></div>
 
-        <div class="row">
-            <div class="left">Cash Sale</div>
-            <div class="right">{cash_sales:,}</div>
-        </div>
+        <div class="row"><span>Cash Sale</span><span>{cash_sales:,}</span></div>
+        <div class="row"><span>Card Sale</span><span>{card_sales:,}</span></div>
+        <div class="row"><span>Foodpanda</span><span>{fp_sales:,}</span></div>
 
         <div class="line"></div>
-
-        <b>EXPENSES</b><br><br>
+        <b>EXPENSES</b><br>
         {expenses_html}
 
-        {f"""
-        <div class="row">
-            <div class="left">CC Tips</div>
-            <div class="right">({cc_tips:,})</div>
-        </div>
-        """ if cc_tips > 0 else ""}
+        {f'<div class="row"><span>CC Tips</span><span>({cc_tips:,})</span></div>' if cc_tips else ''}
 
         <div class="line"></div>
-
         <div class="center">CASH IN HAND</div>
         <div class="total">{expected_cash:,}</div>
 
-        <div class="center" style="margin-top:12px; font-size:11px;">
-            *** End of Report ***
-        </div>
+        <div class="center">*** End ***</div>
     </div>
 
-    <script>
-        setTimeout(function() {{ window.print(); }}, 500);
-    </script>
+    <script>setTimeout(()=>window.print(),500)</script>
     """
 
     components.html(receipt_html, height=0)
