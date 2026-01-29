@@ -1,13 +1,19 @@
 import streamlit.components.v1 as components
 
-def trigger_thermal_print(branch, date_display, cash_sales, cc_tips, expenses, expected_cash):
-
-    # Expense rows: description LEFT, amount RIGHT
+def trigger_thermal_print(
+    branch: str,
+    date_display: str,
+    cash_sales: int,
+    cc_tips: int,
+    expenses: list,
+    expected_cash: int
+):
+    # Description ONLY, amount right-aligned, negative style
     expenses_html = "".join([
         f"""
         <div class="row">
             <div class="left">{e['Description']}</div>
-            <div class="right">({int(e['Amount']):,})</div>
+            <div class="right">({e['Amount']:,})</div>
         </div>
         """
         for e in expenses
@@ -89,7 +95,7 @@ def trigger_thermal_print(branch, date_display, cash_sales, cc_tips, expenses, e
 
         <div class="row">
             <div class="left">Cash Sale</div>
-            <div class="right">{int(cash_sales):,}</div>
+            <div class="right">{cash_sales:,}</div>
         </div>
 
         <div class="line"></div>
@@ -100,14 +106,14 @@ def trigger_thermal_print(branch, date_display, cash_sales, cc_tips, expenses, e
         {f"""
         <div class="row">
             <div class="left">CC Tips</div>
-            <div class="right">({int(cc_tips):,})</div>
+            <div class="right">({cc_tips:,})</div>
         </div>
         """ if cc_tips > 0 else ""}
 
         <div class="line"></div>
 
         <div class="center">CASH IN HAND</div>
-        <div class="total">{int(expected_cash):,}</div>
+        <div class="total">{expected_cash:,}</div>
 
         <div class="center" style="margin-top:12px; font-size:11px;">
             *** End of Report ***
