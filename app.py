@@ -144,14 +144,15 @@ if st.button("🖨️ Confirm & Print Closing", type="primary", use_container_wi
 
 st.divider()
 
-# --- ADDED ENTRIES LIST (MOVED TO BOTTOM) ---
+# --- ADDED ENTRIES LIST (CLEAN VERSION AT BOTTOM) ---
 if st.session_state.expenses:
     st.subheader("📑 Current Expenses List")
     for i, e in enumerate(st.session_state.expenses):
-        with st.container(border=True):
-            cols = st.columns([4, 2, 1])
-            cols[0].markdown(f"**{e['Category']}**: {e['Description']}")
-            cols[1].markdown(f"**PKR {e['Amount']:,}** (Bill: {e['Bill']})")
-            if cols[2].button("🗑️", key=f"del_{i}"):
-                st.session_state.expenses.pop(i)
-                st.rerun()
+        cols = st.columns([3, 4, 2, 2, 1])
+        cols[0].write(f"**{e['Category']}**")
+        cols[1].write(e['Description'])
+        cols[2].write(f"PKR {e['Amount']:,}")
+        cols[3].write(f"Bill: {e['Bill']}")
+        if cols[4].button("🗑️", key=f"del_{i}"):
+            st.session_state.expenses.pop(i)
+            st.rerun()
