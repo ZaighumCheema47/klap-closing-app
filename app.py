@@ -31,7 +31,6 @@ def upsert_closing(branch_name, custom_id, data_rows):
             sheet = client.open(sheet_title).sheet1
             all_records = sheet.get_all_values()
             
-            # Remove existing entries with this specific custom ID
             if len(all_records) > 1:
                 rows_to_delete = [i + 1 for i, row in enumerate(all_records) if row[0] == custom_id]
                 for row_idx in reversed(rows_to_delete):
@@ -51,8 +50,6 @@ if "expenses" not in st.session_state:
     st.session_state.expenses = []
 if "exp_form_key" not in st.session_state:
     st.session_state.exp_form_key = 0
-if "revenue_data" not in st.session_state:
-    st.session_state.revenue_data = {"gross": "", "cash": "", "card": "", "fp": ""}
 
 st.title("🍽️ KLAP Daily Closing")
 
@@ -63,23 +60,15 @@ with st.sidebar:
     if st.button("Load Data"):
         if client and search_id:
             try:
-                # Determine which sheet to check based on ID prefix
                 target_sheet = "KLAP DHA Branch" if "DHA" in search_id else "KLAP Cantt Branch"
                 sheet = client.open(target_sheet).sheet1
                 records = sheet.get_all_values()
-                
-                # Filter rows matching the ID
                 matched_rows = [r for r in records if r[0] == search_id]
                 
                 if matched_rows:
                     temp_expenses = []
                     for row in matched_rows:
-                        # row[2] is Category. If it's SALES_SUMMARY, update the main fields
-                        if row[2] == "SALES_SUMMARY":
-                            # Extract breakdown from description if needed, or just use the amount
-                            # For now, we clear them to let user re-verify
-                            st.info("Sales summary found. Please re-enter revenue components.")
-                        elif row[2] != "CC TIP":
+                        if row[2] not in ["SALES_SUMMARY", "CC TIP"]:
                             temp_expenses.append({
                                 "Date": row[1],
                                 "Category": row[2],
@@ -88,19 +77,18 @@ with st.sidebar:
                                 "Bill": row[5]
                             })
                     st.session_state.expenses = temp_expenses
-                    st.success(f"Loaded {len(temp_expenses)} expenses from {search_id}")
+                    st.success(f"Loaded data for {search_id}")
                     st.rerun()
                 else:
                     st.error("ID not found.")
             except Exception as e:
                 st.error(f"Search Error: {e}")
 
-# Main Branch/Date Select
 col_branch, col_date = st.columns(2)
 branch = col_branch.selectbox("Select Branch", ["Cantt Branch", "DHA Branch"])
 date_selected = col_date.date_input("Closing Date", datetime.today())
 
-# OBJECTIVE 1: NEW ID FORMAT (BRANCH + DDMMYY + CR)
+# NEW ID FORMAT: BRANCH + DDMMYY + CR
 branch_prefix = "DHA" if "DHA" in branch else "CANTT"
 date_compact = date_selected.strftime("%d%m%y")
 daily_id = f"{branch_prefix}{date_compact}CR"
@@ -155,7 +143,6 @@ if cat_choice != "Select Category":
 
 st.divider()
 
-# Tipping and Cash Metric
 tip_status = st.radio("Were there any Credit Card Tips?", ["No", "Yes"], horizontal=True)
 cc_tips = parse_money(st.text_input("Tip Amount")) if tip_status == "Yes" else 0
 
@@ -163,7 +150,7 @@ total_exp = sum(e['Amount'] for e in st.session_state.expenses)
 expected_cash = cash - total_exp - cc_tips
 st.metric("Final Cash in Hand", f"PKR {int(expected_cash):,}")
 
-# --- SUBMIT BUTTON ---
+# --- FIXED SUBMIT & PRINT TRIGGER ---
 if st.button("🖨️ Confirm & Print Closing", type="primary", use_container_width=True):
     if mismatch or gross == 0:
         st.error("Check Revenue Totals before confirming.")
@@ -174,14 +161,24 @@ if st.button("🖨️ Confirm & Print Closing", type="primary", use_container_wi
             rows.append([date_selected.strftime("%d-%m-%y"), "CC TIP", "Paid to staff", cc_tips, "No"])
             
         if upsert_closing(branch, daily_id, rows):
-            st.success(f"Data for {daily_id} updated!")
-            trigger_thermal_print(branch, date_selected.strftime("%d-%m-%y"), cash, card, fp, cc_tips, st.session_state.expenses, expected_cash, daily_id)
+            st.success(f"G-Sheet Updated for ID: {daily_id}")
+            
+            # FIXED: Correct variable names sent to printing function
+            trigger_thermal_print(
+                branch=branch,
+                date_display=date_selected.strftime("%d-%m-%y"),
+                cash_sales=cash,
+                card_sales=card,
+                fp_sales=fp,
+                cc_tips=cc_tips,
+                expenses=st.session_state.expenses,
+                expected_cash=expected_cash,
+                closing_code=daily_id
+            )
             st.session_state.expenses = []
-            st.rerun()
 
 st.divider()
 
-# --- ADDED ENTRIES LIST ---
 if st.session_state.expenses:
     st.subheader("📑 Current Expenses List")
     for i, e in enumerate(st.session_state.expenses):
