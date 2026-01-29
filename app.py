@@ -160,7 +160,7 @@ expected_cash = cash - total_exp - cc_tips
 st.metric("Final Cash in Hand", f"PKR {int(expected_cash):,}")
 
 # SUBMIT
-if st.button("🖨️ Confirm & Update G-Sheet"):
+if st.button("🖨️ Confirm & Print"):
     if mismatch:
         st.error("Error: Total of Cash/Card/FP must equal Gross Sale.")
     elif gross == 0:
