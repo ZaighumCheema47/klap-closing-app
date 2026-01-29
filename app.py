@@ -73,7 +73,7 @@ st.title("🍽️ KLAP Daily Closing")
 col_branch, col_date = st.columns(2)
 branch = col_branch.selectbox("Select Branch", ["Cantt Branch", "DHA Branch"])
 date_selected = col_date.date_input("Closing Date", datetime.today())
-date_str = date_selected.strftime("%Y-%m-%d")
+date_str = date_selected.strftime("%d-%m-%y")
 
 st.divider()
 
