@@ -1,9 +1,24 @@
 import streamlit as st
+from google.oauth2.service_account import Credentials
+from googleapiclient.discovery import build
+import gspread
 
-# MUST be the first line in the main entry file
+# MUST be the first line
 st.set_page_config(page_title="KLAP Master Hub", layout="wide")
 
-# Initialize state to track which module is open
+# --- SHARED AUTHENTICATION CORE ---
+# This ensures both Closing and Billing modules use the same credentials
+def get_gcp_creds():
+    SCOPES = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive"
+    ]
+    return Credentials.from_service_account_info(
+        st.secrets["gcp_service_account"], 
+        scopes=SCOPES
+    )
+
+# --- NAVIGATION LOGIC ---
 if "active_module" not in st.session_state:
     st.session_state.active_module = "Hub"
 
@@ -34,12 +49,18 @@ if st.session_state.active_module == "Hub":
         st.button("Inventory Locked", use_container_width=True, disabled=True)
 
 # --- MODULE ROUTING ---
-elif st.session_state.active_module == "Closing":
-    import closing_module
-    if st.button("⬅️ Back to Hub"): switch_to("Hub")
-    closing_module.run_closing()
+# We use st.container to keep the 'Back' button consistently at the top
+else:
+    with st.container():
+        if st.button("⬅️ Back to Hub", key="back_btn"):
+            switch_to("Hub")
+    
+    st.divider()
 
-elif st.session_state.active_module == "Billing":
-    import billing_module
-    if st.button("⬅️ Back to Hub"): switch_to("Hub")
-    billing_module.run_billing()
+    if st.session_state.active_module == "Closing":
+        import closing_module
+        closing_module.run_closing()
+
+    elif st.session_state.active_module == "Billing":
+        import billing_module
+        billing_module.run_billing()
