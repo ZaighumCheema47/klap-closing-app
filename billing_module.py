@@ -79,3 +79,37 @@ def run_billing():
                     with st.spinner("AI is reading the bill..."):
                         # Gemini Logic here (reuse your previous extract_bill_with_ai function)
                         pass
+                        if uploaded_file:
+    img_bytes = uploaded_file.read()
+    st.image(img_bytes, width=300)
+
+    if st.button("🚀 Process with Gemini AI"):
+        with st.spinner("AI is reading the bill..."):
+            genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+            model = genai.GenerativeModel('gemini-1.5-flash')
+            
+            prompt = f"Analyze this bill. Vendor: {v_select}. {selected_v['Prompt']}. Return ONLY raw JSON: {{'items': [{{'description': 'name', 'qty': 0, 'rate': 0, 'amount': 0}}], 'grand_total': 0}}"
+            
+            response = model.generate_content([prompt, {"mime_type": "image/jpeg", "data": img_bytes}])
+            st.session_state['current_bill'] = json.loads(response.text.replace('```json', '').replace('```', '').strip())
+
+    if 'current_bill' in st.session_state:
+        edited_df = st.data_editor(pd.DataFrame(st.session_state['current_bill']['items']), num_rows="dynamic")
+        
+        if st.button("✅ Save to Master Sheet"):
+            # 1. Access the "Billing" tab in your Branch Master Sheet
+            sheet_id = st.secrets[f"SPREADSHEET_ID_{branch.replace(' Branch', '').upper()}"]
+            doc = gs_client.open_by_key(sheet_id)
+            
+            try:
+                billing_ws = doc.worksheet("Billing")
+            except gspread.exceptions.WorksheetNotFound:
+                billing_ws = doc.add_worksheet(title="Billing", rows="100", cols="8")
+                billing_ws.append_row(["Date", "Vendor", "Item", "Qty", "Rate", "Amount", "Pay Type", "Drive Link"])
+
+            # 2. Append rows to Billing sheet
+            rows_to_save = [[str(date), v_select, r['description'], r['qty'], r['rate'], r['amount'], pay_type, "Link pending"] for _, r in edited_df.iterrows()]
+            billing_ws.append_rows(rows_to_save)
+            
+            st.success("Successfully saved to Billing tab!")
+            del st.session_state['current_bill']
