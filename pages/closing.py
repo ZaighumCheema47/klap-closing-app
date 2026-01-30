@@ -13,6 +13,22 @@ from printing_logic import trigger_thermal_print
 import re
 
 
+# ---------- Force Hide Side Bar ----------
+
+st.set_page_config(initial_sidebar_state="collapsed") #
+
+st.markdown("""
+    <style>
+        [data-testid="stSidebar"] {
+            display: none;
+        }
+        [data-testid="collapsedControl"] {
+            display: none;
+        }
+    </style>
+""", unsafe_allow_html=True) #
+
+
 # ---------- GOOGLE SHEETS CORE ----------
 
 
