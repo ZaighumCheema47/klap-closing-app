@@ -4,6 +4,9 @@ def trigger_thermal_print(branch, date_display, cash_sales, card_sales, fp_sales
     # Calculate Gross for the receipt
     gross_total = cash_sales + card_sales + fp_sales
     
+    # NEW: Calculate Total Expenses
+    total_expenses = sum(int(e['Amount']) for e in expenses)
+    
     # Formatting expense rows
     expenses_html = "".join([
         f"""
@@ -36,7 +39,7 @@ def trigger_thermal_print(branch, date_display, cash_sales, card_sales, fp_sales
 
         #receipt {{
             font-family: 'Arial Black', Gadget, sans-serif;
-            width: 58mm; /* Extra buffer to prevent right-side chopping */
+            width: 58mm;
             padding: 2mm;
             color: #000;
             background-color: #fff;
@@ -69,7 +72,6 @@ def trigger_thermal_print(branch, date_display, cash_sales, card_sales, fp_sales
         .left {{ text-align: left; flex: 1; font-weight: 900; }}
         .right {{ text-align: right; min-width: 22mm; font-weight: 900; }}
         
-        /* Specific styling for the Gross Amount Border */
         .gross-val {{
             border-top: 2px solid #000;
             border-bottom: 2px solid #000;
@@ -123,6 +125,8 @@ def trigger_thermal_print(branch, date_display, cash_sales, card_sales, fp_sales
         <div class="line"></div>
         <b class="section-title">EXPENSES</b>
         {expenses_html if expenses else '<div class="center">NO EXPENSES</div>'}
+        
+        {f'<div class="row" style="border-top: 1px solid #000; margin-top: 4px; font-style: italic;"><span>TOTAL EXPENSES</span><span class="right">({int(total_expenses):,})</span></div>' if expenses else ''}
         
         {f'<div class="row"><span>CC TIPS</span><span class="right">({int(cc_tips):,})</span></div>' if cc_tips > 0 else ''}
 
