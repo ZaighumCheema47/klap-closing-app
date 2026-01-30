@@ -13,14 +13,17 @@ from printing_logic import trigger_thermal_print
 import re
 
 
-
 # ---------- GOOGLE SHEETS CORE ----------
+
 
 def get_gspread_client():
 
     try:
 
-        SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+        SCOPES = [
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive",
+        ]
 
         creds_info = st.secrets["gcp_service_account"]
 
@@ -35,19 +38,17 @@ def get_gspread_client():
         return None
 
 
-
 client = get_gspread_client()
-
 
 
 def parse_money(val):
 
-    if not val: return 0
+    if not val:
+        return 0
 
-    clean_val = re.sub(r'[^\d]', '', str(val).split(".")[0])
+    clean_val = re.sub(r"[^\d]", "", str(val).split(".")[0])
 
     return int(clean_val) if clean_val else 0
-
 
 
 def upsert_sales_data(branch_name, daily_id, date_str, cash, card, fp, gross):
@@ -58,11 +59,11 @@ def upsert_sales_data(branch_name, daily_id, date_str, cash, card, fp, gross):
 
         try:
 
-            sheet_title = "KLAP DHA Branch" if "DHA" in branch_name else "KLAP Cantt Branch"
+            sheet_title = (
+                "KLAP DHA Branch" if "DHA" in branch_name else "KLAP Cantt Branch"
+            )
 
             spreadsheet = client.open(sheet_title)
-
-            
 
             try:
 
@@ -70,23 +71,25 @@ def upsert_sales_data(branch_name, daily_id, date_str, cash, card, fp, gross):
 
             except gspread.exceptions.WorksheetNotFound:
 
-                sales_sheet = spreadsheet.add_worksheet(title="Sales", rows="100", cols="10")
+                sales_sheet = spreadsheet.add_worksheet(
+                    title="Sales", rows="100", cols="10"
+                )
 
-                sales_sheet.append_row(["ID", "Date", "Cash", "Card", "Foodpanda", "Gross"])
-
-
+                sales_sheet.append_row(
+                    ["ID", "Date", "Cash", "Card", "Foodpanda", "Gross"]
+                )
 
             records = sales_sheet.get_all_values()
 
             if len(records) > 1:
 
-                rows_to_delete = [i + 1 for i, row in enumerate(records) if row[0] == daily_id]
+                rows_to_delete = [
+                    i + 1 for i, row in enumerate(records) if row[0] == daily_id
+                ]
 
                 for idx in reversed(rows_to_delete):
 
                     sales_sheet.delete_rows(idx)
-
-            
 
             sales_sheet.append_row([daily_id, date_str, cash, card, fp, gross])
 
@@ -99,7 +102,6 @@ def upsert_sales_data(branch_name, daily_id, date_str, cash, card, fp, gross):
     return False
 
 
-
 def upsert_closing(branch_name, custom_id, data_rows):
 
     """Saves detailed expenses to the main sheet (Sales Summary removed)"""
@@ -108,23 +110,23 @@ def upsert_closing(branch_name, custom_id, data_rows):
 
         try:
 
-            sheet_title = "KLAP DHA Branch" if "DHA" in branch_name else "KLAP Cantt Branch"
+            sheet_title = (
+                "KLAP DHA Branch" if "DHA" in branch_name else "KLAP Cantt Branch"
+            )
 
             sheet = client.open(sheet_title).sheet1
 
             all_records = sheet.get_all_values()
 
-            
-
             if len(all_records) > 1:
 
-                rows_to_delete = [i + 1 for i, row in enumerate(all_records) if row[0] == custom_id]
+                rows_to_delete = [
+                    i + 1 for i, row in enumerate(all_records) if row[0] == custom_id
+                ]
 
                 for row_idx in reversed(rows_to_delete):
 
                     sheet.delete_rows(row_idx)
-
-
 
             final_rows = [[custom_id] + row for row in data_rows]
 
@@ -139,11 +141,9 @@ def upsert_closing(branch_name, custom_id, data_rows):
     return False
 
 
-
 # ---------- UI SETUP ----------
 
 st.set_page_config(page_title="KLAP Daily Closing", layout="centered")
-
 
 
 if "expenses" not in st.session_state:
@@ -155,7 +155,6 @@ if "exp_form_key" not in st.session_state:
     st.session_state.exp_form_key = 0
 
 
-
 # --- TOP SEARCH POPOVER ---
 
 col_title, col_search = st.columns([4, 1])
@@ -163,7 +162,6 @@ col_title, col_search = st.columns([4, 1])
 with col_title:
 
     st.title("🍽️ KLAP Daily Closing")
-
 
 
 with col_search:
@@ -178,7 +176,9 @@ with col_search:
 
                 try:
 
-                    target_sheet = "KLAP DHA Branch" if "DHA" in search_id else "KLAP Cantt Branch"
+                    target_sheet = (
+                        "KLAP DHA Branch" if "DHA" in search_id else "KLAP Cantt Branch"
+                    )
 
                     sheet = client.open(target_sheet).sheet1
 
@@ -191,11 +191,15 @@ with col_search:
                         # Only load actual expenses and tips
 
                         st.session_state.expenses = [
-
-                            {"Date": r[1], "Category": r[2], "Description": r[3], "Amount": int(r[4]), "Bill": r[5]}
-
-                            for r in matched_rows if r[2] != "SALES_SUMMARY"
-
+                            {
+                                "Date": r[1],
+                                "Category": r[2],
+                                "Description": r[3],
+                                "Amount": int(r[4]),
+                                "Bill": r[5],
+                            }
+                            for r in matched_rows
+                            if r[2] != "SALES_SUMMARY"
                         ]
 
                         st.success("Loaded!")
@@ -211,7 +215,6 @@ with col_search:
                     st.error(f"Error: {e}")
 
 
-
 # Branch/Date Select
 
 col_branch, col_date = st.columns(2)
@@ -223,7 +226,6 @@ date_selected = col_date.date_input("Closing Date", datetime.today())
 date_str_display = date_selected.strftime("%d-%m-%y")
 
 
-
 # Internal ID Logic
 
 branch_prefix = "DHA" if "DHA" in branch else "CANTT"
@@ -231,9 +233,7 @@ branch_prefix = "DHA" if "DHA" in branch else "CANTT"
 daily_id = f"{branch_prefix}{date_selected.strftime('%d%m%y')}CR"
 
 
-
 st.divider()
-
 
 
 # REVENUE SUMMARY
@@ -251,7 +251,6 @@ card_in = c2.text_input("Credit Card Sales", placeholder="PKR")
 fp_in = c3.text_input("Foodpanda Sales", placeholder="PKR")
 
 
-
 gross = parse_money(gross_in)
 
 cash = parse_money(cash_in)
@@ -259,7 +258,6 @@ cash = parse_money(cash_in)
 card = parse_money(card_in)
 
 fp = parse_money(fp_in)
-
 
 
 mismatch = (cash + card + fp) != gross
@@ -273,30 +271,49 @@ elif gross > 0 and not mismatch:
     st.success("✅ Revenue totals match.")
 
 
-
 st.divider()
-
 
 
 # EXPENSE ENTRY
 
 st.subheader("💸 Add New Expense")
 
-predefined = ["Select Category", "Staff", "Rides", "Inventory", "Generator", "Bevrages", "Maintenance", "Utilities", "Cleaning", "Other..."]
+predefined = [
+    "Select Category",
+    "Staff",
+    "Rides",
+    "Inventory",
+    "Generator",
+    "Bevrages",
+    "Maintenance",
+    "Utilities",
+    "Cleaning",
+    "Other...",
+]
 
-cat_choice = st.selectbox("1. Category", predefined, key=f"cat_{st.session_state.exp_form_key}")
-
+cat_choice = st.selectbox(
+    "1. Category", predefined, key=f"cat_{st.session_state.exp_form_key}"
+)
 
 
 if cat_choice != "Select Category":
 
-    desc = st.text_input("2. Description (Required)", key=f"desc_{st.session_state.exp_form_key}")
+    desc = st.text_input(
+        "2. Description (Required)", key=f"desc_{st.session_state.exp_form_key}"
+    )
 
     if desc:
 
-        amt_in = st.text_input("3. Amount", placeholder="PKR", key=f"amt_{st.session_state.exp_form_key}")
+        amt_in = st.text_input(
+            "3. Amount", placeholder="PKR", key=f"amt_{st.session_state.exp_form_key}"
+        )
 
-        bill_available = st.radio("Bill Available?", ["No", "Yes"], horizontal=True, key=f"bill_{st.session_state.exp_form_key}")
+        bill_available = st.radio(
+            "Bill Available?",
+            ["No", "Yes"],
+            horizontal=True,
+            key=f"bill_{st.session_state.exp_form_key}",
+        )
 
         if st.button("Add Expense ➕"):
 
@@ -304,22 +321,22 @@ if cat_choice != "Select Category":
 
             if amt > 0:
 
-                st.session_state.expenses.append({
-
-                    "Date": date_str_display, "Category": cat_choice, 
-
-                    "Description": desc, "Amount": amt, "Bill": bill_available
-
-                })
+                st.session_state.expenses.append(
+                    {
+                        "Date": date_str_display,
+                        "Category": cat_choice,
+                        "Description": desc,
+                        "Amount": amt,
+                        "Bill": bill_available,
+                    }
+                )
 
                 st.session_state.exp_form_key += 1
 
                 st.rerun()
 
 
-
 st.divider()
-
 
 
 # Metrics & Tipping
@@ -328,12 +345,11 @@ tip_status = st.radio("Credit Card Tips?", ["No", "Yes"], horizontal=True)
 
 cc_tips = parse_money(st.text_input("Tip Amount")) if tip_status == "Yes" else 0
 
-total_exp = sum(e['Amount'] for e in st.session_state.expenses)
+total_exp = sum(e["Amount"] for e in st.session_state.expenses)
 
 expected_cash = cash - total_exp - cc_tips
 
 st.metric("Final Cash in Hand", f"PKR {int(expected_cash):,}")
-
 
 
 # --- CONFIRM & PRINT ---
@@ -348,50 +364,41 @@ if st.button("🖨️ Confirm & Print Closing", type="primary", use_container_wi
 
         # Rows for main expense sheet (No Sales Summary here)
 
-        rows = [[e['Date'], e['Category'], e['Description'], e['Amount'], e['Bill']] for e in st.session_state.expenses]
+        rows = [
+            [e["Date"], e["Category"], e["Description"], e["Amount"], e["Bill"]]
+            for e in st.session_state.expenses
+        ]
 
         if cc_tips > 0:
 
             rows.append([date_str_display, "CC TIP", "Paid to staff", cc_tips, "No"])
 
-            
-
         # 1. Update Detailed Expenses sheet
 
         # 2. Update separate 'Sales' sheet with revenue line items
 
-        if upsert_closing(branch, daily_id, rows) and upsert_sales_data(branch, daily_id, date_str_display, cash, card, fp, gross):
+        if upsert_closing(branch, daily_id, rows) and upsert_sales_data(
+            branch, daily_id, date_str_display, cash, card, fp, gross
+        ):
 
             st.success(f"Successfully posted! ID: {daily_id}")
 
             trigger_thermal_print(
-
                 branch=branch,
-
                 date_display=date_str_display,
-
                 cash_sales=cash,
-
                 card_sales=card,
-
                 fp_sales=fp,
-
                 cc_tips=cc_tips,
-
                 expenses=st.session_state.expenses,
-
                 expected_cash=expected_cash,
-
-                closing_code=daily_id
-
+                closing_code=daily_id,
             )
 
             st.session_state.expenses = []
 
 
-
 st.divider()
-
 
 
 if st.session_state.expenses:
@@ -404,7 +411,7 @@ if st.session_state.expenses:
 
         cols[0].write(f"**{e['Category']}**")
 
-        cols[1].write(e['Description'])
+        cols[1].write(e["Description"])
 
         cols[2].write(f"PKR {e['Amount']:,}")
 
