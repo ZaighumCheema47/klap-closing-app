@@ -126,7 +126,7 @@ def trigger_thermal_print(branch, date_display, cash_sales, card_sales, fp_sales
         <b class="section-title">EXPENSES</b>
         {expenses_html if expenses else '<div class="center">NO EXPENSES</div>'}
         
-        {f'<div class="row" style="border-top: 1px solid #000; margin-top: 4px; font-style: italic;"><span>TOTAL </span><span class="right">({int(total_expenses):,})</span></div>' if expenses else ''}
+        {f'<div class="row" style="border-top: 1px solid #000; margin-top: 4px; font-style: ;"><span>TOTAL </span><span class="right">({int(total_expenses):,})</span></div>' if expenses else ''}
         
         {f'<div class="row"><span>CC TIPS</span><span class="right">({int(cc_tips):,})</span></div>' if cc_tips > 0 else ''}
 
