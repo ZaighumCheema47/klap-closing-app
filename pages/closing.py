@@ -62,11 +62,11 @@ def upsert_sales_data(branch_name, daily_id, date_str, cash, card, fp, gross):
             neg_cash = cash * -1
             
             # 2. Bank Card (1.16% Fee)
-            bank_fee = round(card * 0.0116, 2)
+            bank_fee = round((card * 0.0116)*-1, 2)
             card_clearing = round((card - bank_fee) * -1, 2)
             
             # 3. Foodpanda (35% Fee)
-            fp_fee = round(fp * 0.35, 2)
+            fp_fee = round((fp * 0.35)*-1, 2)
             fp_clearing = round((fp - fp_fee) * -1, 2)
 
             # ---------- UPSERT LOGIC ----------
