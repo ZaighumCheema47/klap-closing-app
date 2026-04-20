@@ -191,7 +191,7 @@ st.divider()
 
 # EXPENSE ENTRY
 st.subheader("💸 Add New Expense")
-predefined = ["Select Category", "Staff", "Rides", "Inventory", "Generator", "Bevrages", "Maintenance", "Utilities", "Cleaning", "Other..."]
+predefined = ["Select Category", "Staff Food", "Staff Rides", "Groceries", "Generator", "Bevrages", "Repairs", "LPG", "Cleaning", "Demand", "Other"]
 cat_choice = st.selectbox("1. Category", predefined, key=f"cat_{st.session_state.exp_form_key}")
 
 if cat_choice != "Select Category":
