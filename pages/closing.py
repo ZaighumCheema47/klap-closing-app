@@ -39,8 +39,8 @@ def parse_money(val):
     clean_val = re.sub(r"[^\d]", "", str(val).split(".")[0])
     return int(clean_val) if clean_val else 0
 
-def upsert_sales_data(branch_name, daily_id, date_str, cash, card, fp, gross):
-    """Saves/Updates the 'Sales' worksheet with revenue breakdown and automatic clearing calculations"""
+def upsert_sales_data(branch_name, daily_id, date_str, cash, card, fp, gross, cc_tips):
+    """Saves/Updates the 'Sales' worksheet with Settlement vs POS reconciliation"""
     if client:
         try:
             sheet_title = "KLAP DHA Branch" if "DHA" in branch_name else "KLAP Cantt Branch"
@@ -49,24 +49,33 @@ def upsert_sales_data(branch_name, daily_id, date_str, cash, card, fp, gross):
             try:
                 sales_sheet = spreadsheet.worksheet("Sales")
             except gspread.exceptions.WorksheetNotFound:
-                # Create sheet with 11 columns to match your new structure
-                sales_sheet = spreadsheet.add_worksheet(title="Sales", rows="100", cols="11")
+                # 12 columns to accommodate the Settlement logic
+                sales_sheet = spreadsheet.add_worksheet(title="Sales", rows="100", cols="12")
                 sales_sheet.append_row([
-                    "ID", "Date", "Gross Cash Sales", "Gross Card Sales", 
-                    "Gross Foodpanda Sales", "Gross Total", "Cash-in-Hand", 
-                    "Bank POS Fees", "Card Clearing", "FoodPanda Fees", "Foodpanda Clearing"
+                    "ID", "Date", "POS Cash", "POS Card", "Foodpanda", "POS Gross Total", 
+                    "Settlement Card", "Cash-in-Hand", "Bank POS Fees", "Card Clearing", 
+                    "FoodPanda Fees", "Foodpanda Clearing"
                 ])
 
-            # ---------- AUTOMATIC CALCULATIONS ----------
-            # 1. Cash offset (Negative)
+            # ---------- THE ADJUSTED MATH ----------
+            
+            # 1. Settlement Card (POS Card + CC Tip = Bank Statement Figure)
+            settlement_card = card + cc_tips
+            
+            # 2. Cash-in-Hand (Pure POS Cash as a negative offset)
+            # Per your instruction: We are NOT deducting cc_tips from the cash transfer logic
             neg_cash = cash * -1
             
-            # 2. Bank Card (1.16% Fee)
-            bank_fee = round((card * 0.0116)*-1, 2)
-            card_clearing = round((card - bank_fee) * -1, 2)
+            # 3. Bank Fees (Calculated on the full settlement amount)
+            bank_fee = round(settlement_card * 0.0116, 2)
+            neg_bank_fee = bank_fee * -1
             
-            # 3. Foodpanda (35% Fee)
-            fp_fee = round((fp * 0.35)*-1, 2)
+            # 4. Card Clearing (Net amount hitting the bank)
+            card_clearing = round((settlement_card - bank_fee) * -1, 2)
+            
+            # 5. Foodpanda Logic (35% Fee)
+            fp_fee = round(fp * 0.35, 2)
+            neg_fp_fee = fp_fee * -1
             fp_clearing = round((fp - fp_fee) * -1, 2)
 
             # ---------- UPSERT LOGIC ----------
@@ -76,19 +85,20 @@ def upsert_sales_data(branch_name, daily_id, date_str, cash, card, fp, gross):
                 for idx in reversed(rows_to_delete):
                     sales_sheet.delete_rows(idx)
 
-            # Package row for Columns A through K
+            # Map to Columns A through L
             new_row = [
-                daily_id,       # A
-                date_str,       # B
-                cash,           # C
-                card,           # D
-                fp,             # E
-                gross,          # F
-                neg_cash,       # G
-                bank_fee,       # H
-                card_clearing,  # I
-                fp_fee,         # J
-                fp_clearing     # K
+                daily_id,         # A: ID
+                date_str,         # B: Date
+                cash,             # C: POS Cash
+                card,             # D: POS Card
+                fp,               # E: Foodpanda
+                gross,            # F: POS Gross Total
+                settlement_card,  # G: Settlement Card
+                neg_cash,         # H: Cash-in-Hand
+                neg_bank_fee,     # I: Bank POS Fees
+                card_clearing,    # J: Card Clearing
+                neg_fp_fee,       # K: FoodPanda Fees
+                fp_clearing       # L: Foodpanda Clearing
             ]
 
             sales_sheet.append_row(new_row)
@@ -226,8 +236,9 @@ if st.button("🖨️ Confirm & Print Closing", type="primary", use_container_wi
         if cc_tips > 0:
             rows.append([date_str_display, "CC TIP", "Paid to staff", cc_tips, "No"])
 
+        # Pass cc_tips to upsert_sales_data for Settlement reconciliation
         if upsert_closing(branch, daily_id, rows) and upsert_sales_data(
-            branch, daily_id, date_str_display, cash, card, fp, gross
+            branch, daily_id, date_str_display, cash, card, fp, gross, cc_tips
         ):
             st.success(f"Successfully posted! ID: {daily_id}")
             trigger_thermal_print(
