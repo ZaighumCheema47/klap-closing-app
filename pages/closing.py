@@ -175,7 +175,7 @@ daily_id = f"{branch_prefix}{date_selected.strftime('%d%m%y')}CR"
 # ---------- FEATURE 1: BRANCH PIN GATE ----------
 if st.session_state.get("unlocked_branch") != branch:
     st.subheader(f"🔒 Enter PIN for {branch}")
-    pin_entry = st.text_input("4-digit Branch PIN", type="password", max_chars=4, key="pin_entry")
+    pin_entry = st.text_input("4-digit Branch PIN", max_chars=4, key="pin_entry", help="Numbers only")
     if st.button("Unlock"):
         correct_pin = st.secrets.get("branch_pins", {}).get(branch)
         if correct_pin and pin_entry == str(correct_pin):
