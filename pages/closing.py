@@ -264,11 +264,11 @@ def clear_draft():
 
 # REVENUE SUMMARY
 st.subheader("💰 Revenue Summary")
-gross_in = st.text_input("Gross Sale", placeholder="PKR", key="gross_in")
+gross_in = st.text_input("Gross Sale", placeholder="PKR", key="gross_in", on_change=save_draft)
 c1, c2, c3 = st.columns(3)
-cash_in = c1.text_input("Cash Sales", placeholder="PKR", key="cash_in")
-card_in = c2.text_input("Credit Card Sales", placeholder="PKR", key="card_in")
-fp_in = c3.text_input("Foodpanda Sales", placeholder="PKR", key="fp_in")
+cash_in = c1.text_input("Cash Sales", placeholder="PKR", key="cash_in", on_change=save_draft)
+card_in = c2.text_input("Credit Card Sales", placeholder="PKR", key="card_in", on_change=save_draft)
+fp_in = c3.text_input("Foodpanda Sales", placeholder="PKR", key="fp_in", on_change=save_draft)
 
 gross = parse_money(gross_in)
 cash = parse_money(cash_in)
@@ -306,15 +306,11 @@ if cat_choice != "Select Category":
 st.divider()
 
 # Metrics & Tipping
-tip_status = st.radio("Credit Card Tips?", ["No", "Yes"], horizontal=True, key="tip_status")
-cc_tips = parse_money(st.text_input("Tip Amount", key="tip_amt")) if tip_status == "Yes" else 0
+tip_status = st.radio("Credit Card Tips?", ["No", "Yes"], horizontal=True, key="tip_status", on_change=save_draft)
+cc_tips = parse_money(st.text_input("Tip Amount", key="tip_amt", on_change=save_draft)) if tip_status == "Yes" else 0
 total_exp = sum(e["Amount"] for e in st.session_state.expenses)
 expected_cash = cash - total_exp - cc_tips
 st.metric("Final Cash in Hand", f"PKR {int(expected_cash):,}")
-
-# Mirror current form state to localStorage every rerun (covers edits to
-# revenue fields / tips, not just expense add/remove).
-save_draft()
 
 # ---------- FEATURE 2: "ARE YOU SURE?" CONFIRM BEFORE POSTING & PRINTING ----------
 if not st.session_state.confirm_pending:
