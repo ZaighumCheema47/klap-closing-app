@@ -4,7 +4,9 @@ from datetime import datetime
 import gspread
 from google.oauth2.service_account import Credentials
 from printing_logic import trigger_thermal_print
+from streamlit_local_storage import LocalStorage
 import re
+import json
 
 # ---------- Force Hide Side Bar ----------
 st.set_page_config(page_title="KLAP Daily Closing", layout="centered", initial_sidebar_state="collapsed")
@@ -35,7 +37,7 @@ client = get_gspread_client()
 
 # ---------- BRANCH CONFIG ----------
 # Add/remove branches here only — everything else (dropdown, ID prefix,
-# Google Sheet name, search lookup) reads from this one place.
+# Google Sheet name, search lookup, PIN lookup) reads from this one place.
 BRANCH_CONFIG = {
     "Cantt Branch":       {"prefix": "CANTT", "sheet": "KLAP Cantt Branch"},
     "DHA Branch":         {"prefix": "DHA",   "sheet": "KLAP DHA Branch"},
@@ -155,41 +157,12 @@ if "expenses" not in st.session_state:
     st.session_state.expenses = []
 if "exp_form_key" not in st.session_state:
     st.session_state.exp_form_key = 0
+if "confirm_pending" not in st.session_state:
+    st.session_state.confirm_pending = False
 
-# --- TOP SEARCH POPOVER ---
-col_title, col_search = st.columns([4, 1])
-with col_title:
-    st.title("🍽️ KLAP Daily Closing")
+st.title("🍽️ KLAP Daily Closing")
 
-with col_search:
-    with st.popover("🔍 Search"):
-        search_id = st.text_input("ID (e.g. DHA290126CR)").upper().strip()
-        if st.button("Load Data"):
-            if client and search_id:
-                try:
-                    target_sheet = resolve_sheet_from_id(search_id)
-                    sheet = client.open(target_sheet).sheet1
-                    records = sheet.get_all_values()
-                    matched_rows = [r for r in records if r[0] == search_id]
-                    if matched_rows:
-                        st.session_state.expenses = [
-                            {
-                                "Date": r[1],
-                                "Category": r[2],
-                                "Description": r[3],
-                                "Amount": int(r[4]),
-                                "Bill": r[5],
-                            }
-                            for r in matched_rows if r[2] != "SALES_SUMMARY"
-                        ]
-                        st.success("Loaded!")
-                        st.rerun()
-                    else:
-                        st.error("Not found.")
-                except Exception as e:
-                    st.error(f"Error: {e}")
-
-# Branch/Date Select
+# --- BRANCH / DATE SELECT (comes first so we know which PIN to check) ---
 col_branch, col_date = st.columns(2)
 branch = col_branch.selectbox("Select Branch", list(BRANCH_CONFIG.keys()))
 date_selected = col_date.date_input("Closing Date", datetime.today())
@@ -199,15 +172,103 @@ date_str_sheet = date_selected.strftime("%m/%d/%Y")      # used for Google Sheet
 branch_prefix = get_branch_prefix(branch)
 daily_id = f"{branch_prefix}{date_selected.strftime('%d%m%y')}CR"
 
+# ---------- FEATURE 1: BRANCH PIN GATE ----------
+if st.session_state.get("unlocked_branch") != branch:
+    st.subheader(f"🔒 Enter PIN for {branch}")
+    pin_entry = st.text_input("4-digit Branch PIN", type="password", max_chars=4, key="pin_entry")
+    if st.button("Unlock"):
+        correct_pin = st.secrets.get("branch_pins", {}).get(branch)
+        if correct_pin and pin_entry == str(correct_pin):
+            st.session_state.unlocked_branch = branch
+            st.rerun()
+        else:
+            st.error("Incorrect PIN.")
+    st.stop()
+
 st.divider()
+
+# --- SEARCH POPOVER ---
+with st.popover("🔍 Search Past Closing"):
+    search_id = st.text_input("ID (e.g. DHA290126CR)").upper().strip()
+    if st.button("Load Data"):
+        if client and search_id:
+            try:
+                target_sheet = resolve_sheet_from_id(search_id)
+                sheet = client.open(target_sheet).sheet1
+                records = sheet.get_all_values()
+                matched_rows = [r for r in records if r[0] == search_id]
+                if matched_rows:
+                    st.session_state.expenses = [
+                        {
+                            "Date": r[1],
+                            "Category": r[2],
+                            "Description": r[3],
+                            "Amount": int(r[4]),
+                            "Bill": r[5],
+                        }
+                        for r in matched_rows if r[2] != "SALES_SUMMARY"
+                    ]
+                    st.success("Loaded!")
+                    st.rerun()
+                else:
+                    st.error("Not found.")
+            except Exception as e:
+                st.error(f"Error: {e}")
+
+st.divider()
+
+# ---------- FEATURE 3: BROWSER-LOCAL DRAFT PERSISTENCE ----------
+# Everything entered (revenue fields + expenses) is mirrored into the
+# browser's localStorage, scoped to this branch+date. If the Streamlit
+# session drops (wifi blip, tab backgrounded, app cold-starts) and the
+# page reloads, the draft is restored automatically. It's only cleared
+# once the closing is actually posted and printed.
+localS = LocalStorage(key="klap_storage")
+storage_key = f"klap_draft_{branch_prefix}_{date_selected.strftime('%d%m%y')}"
+
+if st.session_state.get("loaded_draft_for") != storage_key:
+    raw_draft = localS.getItem(storage_key)
+    draft = {}
+    if raw_draft:
+        try:
+            draft = json.loads(raw_draft) if isinstance(raw_draft, str) else raw_draft
+        except (TypeError, ValueError):
+            draft = {}
+
+    st.session_state.gross_in = draft.get("gross", "")
+    st.session_state.cash_in = draft.get("cash", "")
+    st.session_state.card_in = draft.get("card", "")
+    st.session_state.fp_in = draft.get("fp", "")
+    st.session_state.tip_status = draft.get("tip_status", "No")
+    st.session_state.tip_amt = draft.get("tip_amt", "")
+    st.session_state.expenses = draft.get("expenses", [])
+    st.session_state.loaded_draft_for = storage_key
+
+    if draft:
+        st.info("↩️ Restored previously entered data for this branch/date.")
+
+def save_draft():
+    payload = {
+        "gross": st.session_state.get("gross_in", ""),
+        "cash": st.session_state.get("cash_in", ""),
+        "card": st.session_state.get("card_in", ""),
+        "fp": st.session_state.get("fp_in", ""),
+        "tip_status": st.session_state.get("tip_status", "No"),
+        "tip_amt": st.session_state.get("tip_amt", ""),
+        "expenses": st.session_state.expenses,
+    }
+    localS.setItem(storage_key, json.dumps(payload), key=f"set_{storage_key}")
+
+def clear_draft():
+    localS.deleteItem(storage_key, key=f"del_{storage_key}")
 
 # REVENUE SUMMARY
 st.subheader("💰 Revenue Summary")
-gross_in = st.text_input("Gross Sale", placeholder="PKR")
+gross_in = st.text_input("Gross Sale", placeholder="PKR", key="gross_in")
 c1, c2, c3 = st.columns(3)
-cash_in = c1.text_input("Cash Sales", placeholder="PKR")
-card_in = c2.text_input("Credit Card Sales", placeholder="PKR")
-fp_in = c3.text_input("Foodpanda Sales", placeholder="PKR")
+cash_in = c1.text_input("Cash Sales", placeholder="PKR", key="cash_in")
+card_in = c2.text_input("Credit Card Sales", placeholder="PKR", key="card_in")
+fp_in = c3.text_input("Foodpanda Sales", placeholder="PKR", key="fp_in")
 
 gross = parse_money(gross_in)
 cash = parse_money(cash_in)
@@ -239,27 +300,41 @@ if cat_choice != "Select Category":
                     "Date": date_str_sheet, "Category": cat_choice, "Description": desc, "Amount": amt, "Bill": bill_available,
                 })
                 st.session_state.exp_form_key += 1
+                save_draft()
                 st.rerun()
 
 st.divider()
 
 # Metrics & Tipping
-tip_status = st.radio("Credit Card Tips?", ["No", "Yes"], horizontal=True)
-cc_tips = parse_money(st.text_input("Tip Amount")) if tip_status == "Yes" else 0
+tip_status = st.radio("Credit Card Tips?", ["No", "Yes"], horizontal=True, key="tip_status")
+cc_tips = parse_money(st.text_input("Tip Amount", key="tip_amt")) if tip_status == "Yes" else 0
 total_exp = sum(e["Amount"] for e in st.session_state.expenses)
 expected_cash = cash - total_exp - cc_tips
 st.metric("Final Cash in Hand", f"PKR {int(expected_cash):,}")
 
-# --- CONFIRM & PRINT ---
-if st.button("🖨️ Confirm & Print Closing", type="primary", use_container_width=True):
-    if mismatch or gross == 0:
-        st.error("Please verify Revenue Totals.")
-    else:
+# Mirror current form state to localStorage every rerun (covers edits to
+# revenue fields / tips, not just expense add/remove).
+save_draft()
+
+# ---------- FEATURE 2: "ARE YOU SURE?" CONFIRM BEFORE POSTING & PRINTING ----------
+if not st.session_state.confirm_pending:
+    if st.button("🖨️ Confirm & Print Closing", type="primary", use_container_width=True):
+        if mismatch or gross == 0:
+            st.error("Please verify Revenue Totals.")
+        else:
+            st.session_state.confirm_pending = True
+            st.rerun()
+else:
+    st.warning(f"⚠️ Post closing **{daily_id}** — Cash in Hand: PKR {int(expected_cash):,}. This will save to Sheets and print the receipt. Continue?")
+    col_yes, col_no = st.columns(2)
+    confirmed = col_yes.button("✅ Yes, Post & Print", use_container_width=True)
+    cancelled = col_no.button("❌ Cancel", use_container_width=True)
+
+    if confirmed:
         rows = [[e["Date"], e["Category"], e["Description"], e["Amount"], e["Bill"]] for e in st.session_state.expenses]
         if cc_tips > 0:
             rows.append([date_str_sheet, "CC TIP", "Paid to staff", cc_tips, "No"])
 
-        # Pass cc_tips to upsert_sales_data for Settlement reconciliation
         if upsert_closing(branch, daily_id, rows) and upsert_sales_data(
             branch, daily_id, date_str_sheet, cash, card, fp, gross, cc_tips
         ):
@@ -270,6 +345,12 @@ if st.button("🖨️ Confirm & Print Closing", type="primary", use_container_wi
                 expected_cash=expected_cash, closing_code=daily_id,
             )
             st.session_state.expenses = []
+            clear_draft()
+            st.session_state.confirm_pending = False
+            st.rerun()
+    elif cancelled:
+        st.session_state.confirm_pending = False
+        st.rerun()
 
 st.divider()
 
@@ -283,4 +364,5 @@ if st.session_state.expenses:
         cols[3].write(f"Bill: {e['Bill']}")
         if cols[4].button("🗑️", key=f"del_{i}"):
             st.session_state.expenses.pop(i)
+            save_draft()
             st.rerun()
