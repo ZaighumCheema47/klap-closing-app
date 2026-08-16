@@ -33,6 +33,28 @@ def get_gspread_client():
 
 client = get_gspread_client()
 
+# ---------- BRANCH CONFIG ----------
+# Add/remove branches here only — everything else (dropdown, ID prefix,
+# Google Sheet name, search lookup) reads from this one place.
+BRANCH_CONFIG = {
+    "Cantt Branch":       {"prefix": "CANTT", "sheet": "KLAP Cantt Branch"},
+    "DHA Branch":         {"prefix": "DHA",   "sheet": "KLAP DHA Branch"},
+    "Pine Avenue Branch": {"prefix": "PINE",  "sheet": "KLAP Pine Avenue Branch"},
+}
+
+def get_sheet_title(branch_name):
+    return BRANCH_CONFIG.get(branch_name, {}).get("sheet", "KLAP Cantt Branch")
+
+def get_branch_prefix(branch_name):
+    return BRANCH_CONFIG.get(branch_name, {}).get("prefix", "CANTT")
+
+def resolve_sheet_from_id(search_id):
+    """Match a closing ID (e.g. PINE290126CR) back to its branch sheet by prefix."""
+    for cfg in BRANCH_CONFIG.values():
+        if search_id.startswith(cfg["prefix"]):
+            return cfg["sheet"]
+    return "KLAP Cantt Branch"
+
 def parse_money(val):
     if not val:
         return 0
@@ -43,7 +65,7 @@ def upsert_sales_data(branch_name, daily_id, date_str, cash, card, fp, gross, cc
     """Saves/Updates the 'Sales' worksheet with Settlement vs POS reconciliation"""
     if client:
         try:
-            sheet_title = "KLAP DHA Branch" if "DHA" in branch_name else "KLAP Cantt Branch"
+            sheet_title = get_sheet_title(branch_name)
             spreadsheet = client.open(sheet_title)
 
             try:
@@ -111,7 +133,7 @@ def upsert_closing(branch_name, custom_id, data_rows):
     """Saves detailed expenses to the main sheet"""
     if client:
         try:
-            sheet_title = "KLAP DHA Branch" if "DHA" in branch_name else "KLAP Cantt Branch"
+            sheet_title = get_sheet_title(branch_name)
             sheet = client.open(sheet_title).sheet1
             all_records = sheet.get_all_values()
 
@@ -145,7 +167,7 @@ with col_search:
         if st.button("Load Data"):
             if client and search_id:
                 try:
-                    target_sheet = "KLAP DHA Branch" if "DHA" in search_id else "KLAP Cantt Branch"
+                    target_sheet = resolve_sheet_from_id(search_id)
                     sheet = client.open(target_sheet).sheet1
                     records = sheet.get_all_values()
                     matched_rows = [r for r in records if r[0] == search_id]
@@ -169,11 +191,12 @@ with col_search:
 
 # Branch/Date Select
 col_branch, col_date = st.columns(2)
-branch = col_branch.selectbox("Select Branch", ["Cantt Branch", "DHA Branch"])
+branch = col_branch.selectbox("Select Branch", list(BRANCH_CONFIG.keys()))
 date_selected = col_date.date_input("Closing Date", datetime.today())
-date_str_display = date_selected.strftime("%d-%m-%y")
+date_str_display = date_selected.strftime("%d-%m-%y")   # used on the printed receipt only
+date_str_sheet = date_selected.strftime("%m/%d/%Y")      # used for Google Sheet rows only
 
-branch_prefix = "DHA" if "DHA" in branch else "CANTT"
+branch_prefix = get_branch_prefix(branch)
 daily_id = f"{branch_prefix}{date_selected.strftime('%d%m%y')}CR"
 
 st.divider()
@@ -213,7 +236,7 @@ if cat_choice != "Select Category":
             amt = parse_money(amt_in)
             if amt > 0:
                 st.session_state.expenses.append({
-                    "Date": date_str_display, "Category": cat_choice, "Description": desc, "Amount": amt, "Bill": bill_available,
+                    "Date": date_str_sheet, "Category": cat_choice, "Description": desc, "Amount": amt, "Bill": bill_available,
                 })
                 st.session_state.exp_form_key += 1
                 st.rerun()
@@ -234,11 +257,11 @@ if st.button("🖨️ Confirm & Print Closing", type="primary", use_container_wi
     else:
         rows = [[e["Date"], e["Category"], e["Description"], e["Amount"], e["Bill"]] for e in st.session_state.expenses]
         if cc_tips > 0:
-            rows.append([date_str_display, "CC TIP", "Paid to staff", cc_tips, "No"])
+            rows.append([date_str_sheet, "CC TIP", "Paid to staff", cc_tips, "No"])
 
         # Pass cc_tips to upsert_sales_data for Settlement reconciliation
         if upsert_closing(branch, daily_id, rows) and upsert_sales_data(
-            branch, daily_id, date_str_display, cash, card, fp, gross, cc_tips
+            branch, daily_id, date_str_sheet, cash, card, fp, gross, cc_tips
         ):
             st.success(f"Successfully posted! ID: {daily_id}")
             trigger_thermal_print(
