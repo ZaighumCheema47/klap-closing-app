@@ -343,7 +343,11 @@ else:
             st.session_state.expenses = []
             clear_draft()
             st.session_state.confirm_pending = False
-            st.rerun()
+            # NOTE: no st.rerun() here on purpose — the receipt component needs
+            # ~500ms for its embedded script to fire window.print() before the
+            # page rerenders. Forcing an immediate rerun tears down that
+            # component first and silently kills the print job. The page will
+            # naturally refresh to a clean state on the user's next interaction.
     elif cancelled:
         st.session_state.confirm_pending = False
         st.rerun()
