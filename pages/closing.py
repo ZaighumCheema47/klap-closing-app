@@ -7,6 +7,8 @@ from printing_logic import trigger_thermal_print
 from streamlit_local_storage import LocalStorage
 import re
 import json
+import time
+from gspread.exceptions import APIError
 
 # ---------- Force Hide Side Bar ----------
 st.set_page_config(page_title="KLAP Daily Closing", layout="centered", initial_sidebar_state="collapsed")
@@ -57,6 +59,36 @@ def resolve_sheet_from_id(search_id):
             return cfg["sheet"]
     return "KLAP Cantt Branch"
 
+def with_backoff(fn, *args, retries=3, **kwargs):
+    """Runs a gspread call, retrying on 429 quota errors with exponential backoff."""
+    for attempt in range(retries):
+        try:
+            return fn(*args, **kwargs)
+        except APIError as e:
+            is_quota = "429" in str(e) or "Quota exceeded" in str(e)
+            if not is_quota or attempt == retries - 1:
+                raise
+            time.sleep(2 ** attempt)  # 1s, 2s, 4s
+
+def batch_delete_rows(sheet, row_indices):
+    """Deletes multiple rows in a single API call instead of one call per row."""
+    if not row_indices:
+        return
+    requests = [
+        {
+            "deleteDimension": {
+                "range": {
+                    "sheetId": sheet.id,
+                    "dimension": "ROWS",
+                    "startIndex": idx - 1,  # 0-indexed, sheet rows are 1-indexed
+                    "endIndex": idx,
+                }
+            }
+        }
+        for idx in sorted(row_indices, reverse=True)
+    ]
+    with_backoff(sheet.spreadsheet.batch_update, {"requests": requests})
+
 def parse_money(val):
     if not val:
         return 0
@@ -106,8 +138,7 @@ def upsert_sales_data(branch_name, daily_id, date_str, cash, card, fp, gross, cc
             records = sales_sheet.get_all_values()
             if len(records) > 1:
                 rows_to_delete = [i + 1 for i, row in enumerate(records) if row[0] == daily_id]
-                for idx in reversed(rows_to_delete):
-                    sales_sheet.delete_rows(idx)
+                batch_delete_rows(sales_sheet, rows_to_delete)
 
             # Map to Columns A through L
             new_row = [
@@ -125,7 +156,7 @@ def upsert_sales_data(branch_name, daily_id, date_str, cash, card, fp, gross, cc
                 fp_clearing       # L: Foodpanda Clearing
             ]
 
-            sales_sheet.append_row(new_row)
+            with_backoff(sales_sheet.append_row, new_row)
             return True
         except Exception as e:
             st.error(f"Sales Sheet Error: {e}")
@@ -141,11 +172,10 @@ def upsert_closing(branch_name, custom_id, data_rows):
 
             if len(all_records) > 1:
                 rows_to_delete = [i + 1 for i, row in enumerate(all_records) if row[0] == custom_id]
-                for row_idx in reversed(rows_to_delete):
-                    sheet.delete_rows(row_idx)
+                batch_delete_rows(sheet, rows_to_delete)
 
             final_rows = [[custom_id] + row for row in data_rows]
-            sheet.append_rows(final_rows)
+            with_backoff(sheet.append_rows, final_rows)
             return True
         except Exception as e:
             st.error(f"Expense Sheet Error: {e}")
