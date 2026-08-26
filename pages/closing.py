@@ -331,6 +331,10 @@ if cat_choice != "Select Category":
                 })
                 st.session_state.exp_form_key += 1
                 save_draft()
+                # save_draft() writes to browser localStorage via an async component
+                # call — give it one render cycle to actually land before we tear
+                # the page down with rerun, or the write is silently lost.
+                time.sleep(0.4)
                 st.rerun()
 
 st.divider()
@@ -395,4 +399,5 @@ if st.session_state.expenses:
         if cols[4].button("🗑️", key=f"del_{i}"):
             st.session_state.expenses.pop(i)
             save_draft()
+            time.sleep(0.4)
             st.rerun()
