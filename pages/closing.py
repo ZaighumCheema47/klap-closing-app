@@ -289,6 +289,15 @@ def save_draft():
     }
     localS.setItem(storage_key, json.dumps(payload), key=f"set_{storage_key}")
 
+# Runs on a plain pass that is never immediately followed by an explicit
+# st.rerun() in the same script execution, so the localStorage write
+# component actually gets flushed to the browser and mounted before
+# anything tears the page down. Button handlers that mutate expenses just
+# set this flag and rerun; the actual save happens here, one pass later.
+if st.session_state.get("needs_save"):
+    save_draft()
+    st.session_state.needs_save = False
+
 def clear_draft():
     localS.deleteItem(storage_key, key=f"del_{storage_key}")
 
@@ -330,11 +339,7 @@ if cat_choice != "Select Category":
                     "Date": date_str_sheet, "Category": cat_choice, "Description": desc, "Amount": amt, "Bill": bill_available,
                 })
                 st.session_state.exp_form_key += 1
-                save_draft()
-                # save_draft() writes to browser localStorage via an async component
-                # call — give it one render cycle to actually land before we tear
-                # the page down with rerun, or the write is silently lost.
-                time.sleep(0.4)
+                st.session_state.needs_save = True
                 st.rerun()
 
 st.divider()
@@ -398,6 +403,5 @@ if st.session_state.expenses:
         cols[3].write(f"Bill: {e['Bill']}")
         if cols[4].button("🗑️", key=f"del_{i}"):
             st.session_state.expenses.pop(i)
-            save_draft()
-            time.sleep(0.4)
+            st.session_state.needs_save = True
             st.rerun()
