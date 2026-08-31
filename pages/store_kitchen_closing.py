@@ -9,12 +9,26 @@ import time
 from gspread.exceptions import APIError
 
 # ---------- Force Hide Side Bar ----------
-st.set_page_config(page_title="KLAP Store & Kitchen Closing", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="KLAP Store & Kitchen Closing", layout="centered", initial_sidebar_state="collapsed")
 
+# The count is done on a phone, walking the kitchen one shelf at a time — so the
+# entry screen is built for a thumb, not for a spreadsheet. Tighter page padding,
+# larger number fields, and no tiny +/- steppers to mis-tap on a small screen.
 st.markdown("""
     <style>
         [data-testid="stSidebar"] { display: none; }
         [data-testid="collapsedControl"] { display: none; }
+
+        .block-container { padding-top: 2.5rem; padding-bottom: 4rem; }
+
+        input[type="number"] { font-size: 1.05rem !important; font-weight: 600; }
+
+        @media (max-width: 640px) {
+            .block-container { padding-left: 0.75rem; padding-right: 0.75rem; }
+            [data-testid="stNumberInputStepUp"],
+            [data-testid="stNumberInputStepDown"] { display: none; }
+            h1 { font-size: 1.5rem !important; }
+        }
     </style>
 """, unsafe_allow_html=True)
 
@@ -23,7 +37,7 @@ st.markdown("""
 @st.cache_resource(show_spinner=False)
 def get_gspread_client():
     """Cached so the service-account handshake happens once per session, not on
-    every rerun — the grid reruns the whole script on each cell edit."""
+    every rerun — Streamlit reruns the whole script on each keystroke."""
     try:
         SCOPES = [
             "https://www.googleapis.com/auth/spreadsheets",
@@ -87,10 +101,26 @@ def parse_num(val):
     except (TypeError, ValueError):
         return 0.0
 
+def parse_opt(val):
+    """Like parse_num, but keeps 'not counted yet' distinct from a counted zero.
+    A blank closing must never silently save as 0 — that reads as 'we used the lot'."""
+    if val is None or val == "":
+        return None
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return None
+
 def r3(val):
-    """Rounds to 3dp before comparing — raw float math produces dust like
-    0.1 + 0.2 != 0.3, which would otherwise flag clean rows as impossible."""
+    """Rounds before comparing — raw float math leaves dust like 0.1 + 0.2 != 0.3,
+    which would otherwise flag perfectly clean rows as impossible."""
     return round(float(val), 3)
+
+def fmt(val):
+    """Trims trailing zeros so 12.0 reads as '12' but 2.25 keeps its precision."""
+    if val is None:
+        return "—"
+    return f"{float(val):g}"
 
 # ---------- ITEM MASTER (from "Store & Kitchen Daily Closing.xlsx") ----------
 
@@ -157,12 +187,12 @@ def compute(d):
         Available   = Opening + Adjustment + Received
         Consumption = Available - Wastage - Staff Meal - Closing
 
-    Because nobody can type Consumption, it cannot be plugged to make the
-    day look tidy — the only inputs are what physically arrived and what is
-    physically on the shelf."""
+    Because nobody can type Consumption, it cannot be plugged to make the day
+    look tidy. Returns (available, None) while the item is still uncounted."""
     available = d["Opening"] + d["Adjust"] + d["Received"]
-    consumption = available - d["Wastage"] - d["StaffMeal"] - d["Closing"]
-    return available, consumption
+    if d["Closing"] is None:
+        return available, None
+    return available, available - d["Wastage"] - d["StaffMeal"] - d["Closing"]
 
 # ---------- SHEET HELPERS ----------
 
@@ -190,14 +220,14 @@ def load_sheet_state(branch_name, sheet_type, target_date, date_str):
     if not values:
         return {}, {}, False
 
-    # Header drift check costs nothing here — we already have row 1 in hand.
+    # Header drift check costs nothing here — row 1 is already in hand.
     if values[0] != HEADER:
         if len(values) <= 1:
             with_backoff(ws.update, range_name="A1", values=[HEADER])
         else:
             st.warning(
-                "⚠️ This worksheet was written by an older version of this page and its "
-                "columns no longer match. Rename or archive the existing "
+                "⚠️ This worksheet was written by an older version of this page and its columns "
+                f"no longer match. Rename or archive the existing "
                 f"'{SHEET_TYPES[sheet_type]['worksheet']}' tab so a fresh one can be created."
             )
 
@@ -226,7 +256,7 @@ def load_sheet_state(branch_name, sheet_type, target_date, date_str):
     return existing, {k: v[1] for k, v in latest.items()}, has_history
 
 def save_inventory(branch_name, sheet_type, date_str, rows):
-    """Upserts every item row for this date (deletes any existing rows for the date first)."""
+    """Upserts the counted rows for this date (deletes any existing rows for it first)."""
     ws = get_or_create_worksheet(branch_name, sheet_type)
     if not ws:
         return False
@@ -241,39 +271,42 @@ def save_inventory(branch_name, sheet_type, date_str, rows):
         st.error(f"Inventory Sheet Error: {e}")
         return False
 
-# ---------- UI ----------
+# ---------- HEADER / SELECTION ----------
 
-st.title("📦 KLAP Store & Kitchen Daily Closing")
+st.title("📦 Daily Stock Count")
 
-col_branch, col_type, col_date = st.columns(3)
-branch = col_branch.selectbox("Select Branch", list(BRANCH_CONFIG.keys()))
-sheet_type = col_type.radio("Count Sheet", list(SHEET_TYPES.keys()), horizontal=True)
-date_selected = col_date.date_input("Closing Date", datetime.today())
+with st.expander("⚙️ Branch, sheet & date", expanded=not st.session_state.get("sk_started")):
+    branch = st.selectbox("Branch", list(BRANCH_CONFIG.keys()))
+    sheet_type = st.radio("Count sheet", list(SHEET_TYPES.keys()), horizontal=True)
+    date_selected = st.date_input("Closing date", datetime.today())
+
 date_str_sheet = date_selected.strftime("%m/%d/%Y")
 
 # ---------- BRANCH PIN GATE (shared with Daily Closing) ----------
 if st.session_state.get("unlocked_branch") != branch:
     st.subheader(f"🔒 Enter PIN for {branch}")
     pin_entry = st.text_input("4-digit Branch PIN", max_chars=4, key="sk_pin_entry", help="Numbers only")
-    if st.button("Unlock"):
+    if st.button("Unlock", use_container_width=True):
         correct_pin = st.secrets.get("branch_pins", {}).get(branch)
         if correct_pin and pin_entry == str(correct_pin):
             st.session_state.unlocked_branch = branch
+            st.session_state.sk_started = True
             st.rerun()
         else:
             st.error("Incorrect PIN.")
     st.stop()
 
-st.divider()
+st.session_state.sk_started = True
 
 cfg = SHEET_TYPES[sheet_type]
 items = cfg["items"]
-categories = list(dict.fromkeys(cat for cat, _, _ in items))  # preserves first-seen order
+categories = list(dict.fromkeys(cat for cat, _, _ in items))
+items_by_cat = {c: [(i, u) for cc, i, u in items if cc == c] for c in categories}
 
 # ---------- LOAD / DRAFT STATE ----------
 localS = LocalStorage(key="klap_sk_storage")
 selection_key = f"{branch}|{sheet_type}|{date_selected.strftime('%d%m%y')}"
-storage_key = f"sk_draft_v2_{selection_key}"
+storage_key = f"sk_draft_v3_{selection_key}"
 
 if st.session_state.get("sk_loaded_for") != selection_key:
     raw_draft = None
@@ -297,197 +330,232 @@ if st.session_state.get("sk_loaded_for") != selection_key:
             data[item] = {
                 "Opening": parse_num(src.get("Opening")), "Adjust": parse_num(src.get("Adjust")),
                 "Received": parse_num(src.get("Received")), "Wastage": parse_num(src.get("Wastage")),
-                "StaffMeal": parse_num(src.get("StaffMeal")), "Closing": parse_num(src.get("Closing")),
+                "StaffMeal": parse_num(src.get("StaffMeal")), "Closing": parse_opt(src.get("Closing")),
                 "Remarks": src.get("Remarks", "") or "",
             }
         else:
             data[item] = {
                 "Opening": parse_num(prev_closing.get(item, 0)), "Adjust": 0.0, "Received": 0.0,
-                "Wastage": 0.0, "StaffMeal": 0.0, "Closing": 0.0, "Remarks": "",
+                "Wastage": 0.0, "StaffMeal": 0.0, "Closing": None, "Remarks": "",
             }
 
     st.session_state.sk_data = data
     st.session_state.sk_seed_mode = not has_history
     st.session_state.sk_loaded_for = selection_key
+    st.session_state.sk_cat = categories[0]
 
     if existing:
-        st.info(f"↩️ Loaded the saved {sheet_type} count for {date_str_sheet}.")
+        st.info(f"↩️ Loaded the saved count for {date_str_sheet}.")
     elif prev_closing:
-        st.info("↩️ Opening Stock carried forward from the previous count.")
+        st.info("↩️ Opening stock carried forward from the previous count.")
 
 seed_mode = st.session_state.get("sk_seed_mode", False)
+data = st.session_state.sk_data
 
 def save_draft():
     try:
-        localS.setItem(storage_key, json.dumps(st.session_state.sk_data), key=f"set_{storage_key}")
+        localS.setItem(storage_key, json.dumps(data), key=f"set_{storage_key}")
     except Exception:
         pass
 
-st.caption(f"{sheet_type} count sheet · {branch} · {date_str_sheet}")
+# ---------- PROGRESS ----------
+counted_items = [i for _, i, _ in items if data[i]["Closing"] is not None]
+total_items = len(items)
+done = len(counted_items)
+
+st.caption(f"**{branch}** · {sheet_type} · {date_str_sheet}")
+st.progress(done / total_items if total_items else 0.0, text=f"{done} of {total_items} items counted")
 
 if seed_mode:
     st.warning(
-        "🌱 **Baseline count** — there is no earlier count on record, so **Opening Stock is open "
-        "for entry this once**. Count every item physically and type what is actually on the shelf "
-        "into Opening Stock. Every future day carries forward from here, so take the time to get it right."
-    )
-else:
-    st.caption(
-        "Opening Stock is locked — it carries forward from the last count so the day-to-day chain "
-        "can't be broken. Genuine corrections (found stock, a delivery booked to the wrong day, a new "
-        "item) go in **Adjustment**, which requires a reason in Remarks. **Consumption is calculated**, "
-        "not typed: Opening + Adjustment + Received − Wastage − Staff Meal − Closing."
+        "🌱 **Opening balance** — no earlier count exists, so this is your baseline. "
+        "Count each item and enter what is physically on the shelf right now. "
+        "Every future day carries forward from these numbers, so take your time."
     )
 
-# ---------- CATEGORY GRIDS ----------
-COLUMN_ORDER = ["Item", "Unit", "Opening", "Adjust", "Received", "Available",
-                "Wastage", "StaffMeal", "Closing", "Consumption", "Remarks"]
+# ---------- VIEW SWITCH ----------
+view = st.radio(
+    "View", ["📱 Count", "📋 Review & Save"], horizontal=True, label_visibility="collapsed"
+)
 
-locked_cols = ["Item", "Unit", "Available", "Consumption"]
-if not seed_mode:
-    locked_cols.append("Opening")
+# ================= COUNT VIEW (one category at a time) =================
+if view == "📱 Count":
 
-impossible_rows = []      # closing + wastage + staff meal exceeds what was available
-adjust_no_reason = []     # adjustment entered with no explanation
-untouched = 0             # rows with no movement at all — a hint the count wasn't done
+    def cat_label(c):
+        picked = items_by_cat[c]
+        n_done = sum(1 for i, _ in picked if data[i]["Closing"] is not None)
+        mark = "✅" if n_done == len(picked) else ("🟡" if n_done else "⬜")
+        return f"{mark} {c} — {n_done}/{len(picked)}"
 
-for cat in categories:
-    cat_items = [(item, unit) for c, item, unit in items if c == cat]
-    df_rows = []
-    for item, unit in cat_items:
-        d = st.session_state.sk_data[item]
+    current = st.session_state.get("sk_cat", categories[0])
+    if current not in categories:
+        current = categories[0]
+
+    chosen = st.selectbox(
+        "Section", categories, index=categories.index(current),
+        format_func=cat_label, key="sk_cat_picker",
+    )
+    if chosen != current:
+        st.session_state.sk_cat = chosen
+        current = chosen
+
+    st.divider()
+
+    for item, unit in items_by_cat[current]:
+        d = data[item]
         available, consumption = compute(d)
-        df_rows.append({
-            "Item": item, "Unit": unit,
-            "Opening": d["Opening"], "Adjust": d["Adjust"], "Received": d["Received"],
-            "Available": available,
-            "Wastage": d["Wastage"], "StaffMeal": d["StaffMeal"], "Closing": d["Closing"],
-            "Consumption": consumption,
-            "Remarks": d["Remarks"],
-        })
-    df = pd.DataFrame(df_rows)
 
-    with st.expander(f"{cat}  ({len(cat_items)} items)"):
-        edited = st.data_editor(
-            df,
-            key=f"editor_{sheet_type}_{cat}",
-            hide_index=True,
-            use_container_width=True,
-            num_rows="fixed",
-            column_order=COLUMN_ORDER,
-            disabled=locked_cols,
-            column_config={
-                "Item": st.column_config.TextColumn("Item", width="medium"),
-                "Unit": st.column_config.TextColumn("Unit", width="small"),
-                "Opening": st.column_config.NumberColumn("Opening", min_value=0, format="%.2f", width="small"),
-                "Adjust": st.column_config.NumberColumn(
-                    "Adjustment", format="%.2f", width="small",
-                    help="Correction to opening stock (+/-). A reason in Remarks is required.",
-                ),
-                "Received": st.column_config.NumberColumn(
-                    cfg["in_label"], min_value=0, format="%.2f", width="small",
-                    help="Stock received from the store or a vendor today.",
-                ),
-                "Available": st.column_config.NumberColumn(
-                    "Available", format="%.2f", width="small",
-                    help="Calculated: Opening + Adjustment + Received.",
-                ),
-                "Wastage": st.column_config.NumberColumn(
-                    "Wastage", min_value=0, format="%.2f", width="small",
-                    help="Spoiled, burnt or discarded. Keeping this separate stops it looking like theft.",
-                ),
-                "StaffMeal": st.column_config.NumberColumn(
-                    "Staff Meal", min_value=0, format="%.2f", width="small",
-                    help="Consumed by staff or given as a complimentary.",
-                ),
-                "Closing": st.column_config.NumberColumn(
-                    "Closing", min_value=0, format="%.2f", width="small",
-                    help="What you physically counted on the shelf.",
-                ),
-                "Consumption": st.column_config.NumberColumn(
-                    "Consumption", format="%.2f", width="small",
-                    help="Calculated, not typed: Available − Wastage − Staff Meal − Closing.",
-                ),
-                "Remarks": st.column_config.TextColumn("Remarks / Demand", width="medium"),
-            },
-        )
+        with st.container(border=True):
+            head_l, head_r = st.columns([3, 1])
+            head_l.markdown(f"**{item}**")
+            head_r.markdown(
+                f"<div style='text-align:right;opacity:.6;padding-top:.15rem'>{unit}</div>",
+                unsafe_allow_html=True,
+            )
 
-        # push edits back into session state; everything derived is recomputed from them
-        for _, row in edited.iterrows():
-            item = row["Item"]
-            d = {
-                "Opening": parse_num(row["Opening"]), "Adjust": parse_num(row["Adjust"]),
-                "Received": parse_num(row["Received"]), "Wastage": parse_num(row["Wastage"]),
-                "StaffMeal": parse_num(row["StaffMeal"]), "Closing": parse_num(row["Closing"]),
-                "Remarks": row["Remarks"] or "",
-            }
-            st.session_state.sk_data[item] = d
+            if seed_mode:
+                # Baseline day: one number per item, nothing else to ask for.
+                val = st.number_input(
+                    "Stock on hand now", value=d["Closing"], min_value=0.0, step=1.0,
+                    format="%.2f", key=f"seed_{item}", placeholder="Enter count",
+                )
+                d["Opening"] = parse_num(val)
+                d["Closing"] = parse_opt(val)
+                d["Adjust"] = d["Received"] = d["Wastage"] = d["StaffMeal"] = 0.0
+            else:
+                st.caption(f"Opening **{fmt(d['Opening'])}**  ·  Available **{fmt(available)}** {unit}")
 
-            available, consumption = compute(d)
-            if r3(consumption) < 0:
-                impossible_rows.append({"Item": item, "Available": available, "Short by": -consumption})
-            if r3(d["Adjust"]) != 0 and not str(d["Remarks"]).strip():
-                adjust_no_reason.append({"Item": item, "Adjustment": d["Adjust"]})
-            if all(r3(d[k]) == 0 for k in ("Adjust", "Received", "Wastage", "StaffMeal")) and r3(consumption) == 0:
-                untouched += 1
+                in_col, close_col = st.columns(2)
+                d["Received"] = parse_num(in_col.number_input(
+                    cfg["in_label"], value=d["Received"], min_value=0.0, step=1.0,
+                    format="%.2f", key=f"rec_{item}",
+                ))
+                d["Closing"] = parse_opt(close_col.number_input(
+                    "Closing count", value=d["Closing"], min_value=0.0, step=1.0,
+                    format="%.2f", key=f"cls_{item}", placeholder="Count",
+                ))
 
-save_draft()
+                with st.expander("Wastage · staff meal · adjustment · remarks"):
+                    w_col, s_col = st.columns(2)
+                    d["Wastage"] = parse_num(w_col.number_input(
+                        "Wastage", value=d["Wastage"], min_value=0.0, step=1.0,
+                        format="%.2f", key=f"wst_{item}",
+                        help="Spoiled, burnt or discarded — kept separate so it doesn't look like theft.",
+                    ))
+                    d["StaffMeal"] = parse_num(s_col.number_input(
+                        "Staff meal", value=d["StaffMeal"], min_value=0.0, step=1.0,
+                        format="%.2f", key=f"stf_{item}",
+                        help="Eaten by staff or given as a complimentary.",
+                    ))
+                    d["Adjust"] = parse_num(st.number_input(
+                        "Adjustment (+/-)", value=d["Adjust"], step=1.0, format="%.2f",
+                        key=f"adj_{item}",
+                        help="Correction to opening stock. A reason in Remarks is required.",
+                    ))
+                    d["Remarks"] = st.text_input(
+                        "Remarks / demand", value=d["Remarks"], key=f"rmk_{item}",
+                    )
 
-# ---------- REVIEW BEFORE SAVING ----------
-st.divider()
-st.subheader("🔎 Review")
+                available, consumption = compute(d)
+                if consumption is None:
+                    st.caption("Consumption — *not counted yet*")
+                elif r3(consumption) < 0:
+                    st.error(f"Counted {fmt(d['Closing'])} but only {fmt(available)} was available.")
+                else:
+                    st.caption(f"Consumption **{fmt(consumption)}** {unit}")
 
-blocking = bool(impossible_rows or adjust_no_reason)
+    save_draft()
 
-if impossible_rows:
-    st.error(
-        f"❌ {len(impossible_rows)} item(s) count higher than what was available. That is physically "
-        "impossible, so it is either a delivery that was never entered in Received, or a miscount. "
-        "Fix these before saving — a wrong closing figure becomes tomorrow's wrong opening."
-    )
-    st.dataframe(pd.DataFrame(impossible_rows), hide_index=True, use_container_width=True)
-
-if adjust_no_reason:
-    st.error(
-        f"❌ {len(adjust_no_reason)} item(s) have an Adjustment with no reason in Remarks. "
-        "An unexplained adjustment is exactly what this column exists to prevent."
-    )
-    st.dataframe(pd.DataFrame(adjust_no_reason), hide_index=True, use_container_width=True)
-
-if not blocking:
-    st.success("✅ Nothing blocking — the count is arithmetically sound.")
-
-if untouched:
-    st.caption(
-        f"ℹ️ {untouched} of {len(items)} items show no movement at all today "
-        "(nothing received, nothing consumed). Normal for slow-moving stock — worth a second look "
-        "if the number is high."
-    )
-
-st.divider()
-
-# ---------- SAVE ----------
-if st.button("💾 Save Inventory Count", type="primary", use_container_width=True, disabled=blocking):
-    saved_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    rows = []
-    for cat, item, unit in items:
-        d = st.session_state.sk_data[item]
-        available, consumption = compute(d)
-        rows.append([
-            date_str_sheet, cat, item, unit,
-            d["Opening"], d["Adjust"], d["Received"], available,
-            d["Wastage"], d["StaffMeal"], d["Closing"], consumption,
-            d["Remarks"], saved_at,
-        ])
-
-    if save_inventory(branch, sheet_type, date_str_sheet, rows):
-        st.success(f"Saved {sheet_type} count for {branch} — {date_str_sheet}.")
-        try:
-            localS.deleteItem(storage_key, key=f"del_{storage_key}")
-        except Exception:
-            pass
-        st.session_state.sk_loaded_for = None
+    st.divider()
+    idx = categories.index(current)
+    prev_col, next_col = st.columns(2)
+    if prev_col.button("◀ Previous", use_container_width=True, disabled=idx == 0):
+        st.session_state.sk_cat = categories[idx - 1]
+        st.rerun()
+    if next_col.button("Next ▶", use_container_width=True, disabled=idx == len(categories) - 1):
+        st.session_state.sk_cat = categories[idx + 1]
         st.rerun()
 
-if blocking:
-    st.caption("Saving is disabled until the errors above are resolved.")
+    if idx == len(categories) - 1:
+        st.caption("Last section — switch to **📋 Review & Save** when you're done.")
+
+# ================= REVIEW & SAVE =================
+else:
+    impossible_rows, adjust_no_reason, table = [], [], []
+
+    for cat, item, unit in items:
+        d = data[item]
+        available, consumption = compute(d)
+        if consumption is not None and r3(consumption) < 0:
+            impossible_rows.append({"Item": item, "Available": available, "Counted": d["Closing"]})
+        if r3(d["Adjust"]) != 0 and not str(d["Remarks"]).strip():
+            adjust_no_reason.append({"Item": item, "Adjustment": d["Adjust"]})
+        table.append({
+            "": "✅" if d["Closing"] is not None else "⬜",
+            "Item": item, "Unit": unit,
+            "Opening": d["Opening"], "Recv": d["Received"], "Waste": d["Wastage"],
+            "Staff": d["StaffMeal"], "Closing": d["Closing"], "Used": consumption,
+            "Remarks": d["Remarks"],
+        })
+
+    blocking = bool(impossible_rows or adjust_no_reason) or done == 0
+
+    if impossible_rows:
+        st.error(
+            f"❌ {len(impossible_rows)} item(s) were counted higher than what was available — "
+            "physically impossible. Either a delivery was never entered in "
+            f"**{cfg['in_label']}**, or it's a miscount. Fix these first: a wrong closing "
+            "becomes tomorrow's wrong opening."
+        )
+        st.dataframe(pd.DataFrame(impossible_rows), hide_index=True, use_container_width=True)
+
+    if adjust_no_reason:
+        st.error(
+            f"❌ {len(adjust_no_reason)} item(s) have an adjustment with no reason in Remarks. "
+            "An unexplained adjustment is exactly what that field exists to prevent."
+        )
+        st.dataframe(pd.DataFrame(adjust_no_reason), hide_index=True, use_container_width=True)
+
+    if done < total_items:
+        st.info(
+            f"ℹ️ {total_items - done} item(s) not counted. Only counted items are saved — "
+            "their opening will carry forward from the last day they *were* counted, so a "
+            "partial count is safe."
+        )
+
+    if not blocking:
+        st.success(f"✅ {done} item(s) ready to save — the count is arithmetically sound.")
+    elif done == 0:
+        st.warning("Nothing counted yet.")
+
+    with st.expander(f"Full sheet ({total_items} items)"):
+        st.dataframe(pd.DataFrame(table), hide_index=True, use_container_width=True)
+
+    st.divider()
+
+    if st.button("💾 Save Stock Count", type="primary", use_container_width=True, disabled=blocking):
+        saved_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        rows = []
+        for cat, item, unit in items:
+            d = data[item]
+            if d["Closing"] is None:
+                continue  # never invent a count that nobody took
+            available, consumption = compute(d)
+            rows.append([
+                date_str_sheet, cat, item, unit,
+                d["Opening"], d["Adjust"], d["Received"], available,
+                d["Wastage"], d["StaffMeal"], d["Closing"], consumption,
+                d["Remarks"], saved_at,
+            ])
+
+        if save_inventory(branch, sheet_type, date_str_sheet, rows):
+            st.success(f"Saved {len(rows)} item(s) for {branch} — {date_str_sheet}.")
+            try:
+                localS.deleteItem(storage_key, key=f"del_{storage_key}")
+            except Exception:
+                pass
+            st.session_state.sk_loaded_for = None
+            st.rerun()
+
+    if blocking and done:
+        st.caption("Saving is disabled until the errors above are resolved.")
