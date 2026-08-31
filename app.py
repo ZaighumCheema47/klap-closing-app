@@ -38,12 +38,16 @@ st.markdown("""
 st.title("🍽️ KLAP Dashboard")
 st.write("Select a module to continue:")
 
-col1, col2 = st.columns(2)
+col1, col2, col3 = st.columns(3)
 
 with col1:
     if st.button("📝\nDaily Closing", use_container_width=True):
         st.switch_page("pages/closing.py")
 
 with col2:
+    if st.button("📦\nStore & Kitchen\nClosing", use_container_width=True):
+        st.switch_page("pages/store_kitchen_closing.py")
+
+with col3:
     if st.button("🧾\nBilling (New)", use_container_width=True):
         st.switch_page("pages/billing.py")
