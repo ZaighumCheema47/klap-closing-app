@@ -86,62 +86,12 @@ def parse_num(val):
 
 # ---------- ITEM MASTER (from "Store & Kitchen Daily Closing.xlsx") ----------
 
-STORE_ITEMS = [
-    ("MEAT", "Beef", "Kg"), ("MEAT", "Beef Pepperoni", "Pkts"), ("MEAT", "Beef Bacon", "Kg"),
-    ("CHICKEN", "Burger Chicken", "Kg"), ("CHICKEN", "Pizza Julia Chicken", "Kg"),
-    ("BUNS & DOUGH", "Buns", "Nos"), ("BUNS & DOUGH", "Dough", "Nos"),
-    ("CHEESE", "Cheese Slice Yellow", "Pkts"), ("CHEESE", "Cheese Slice White", "Pkts"), ("CHEESE", "Pizza Cheese", "Pkts"),
-    ("FRIES", "Fries", "Pkts"),
-    ("SAUCE", "Pizza Sauce", "Kg"), ("SAUCE", "Bang Bang Dips Sauce", "Kg"), ("SAUCE", "Right Back Sauce", "Kg"),
-    ("SAUCE", "Bang Bang For Burger Sauce", "Kg"), ("SAUCE", "Butter Mushroom Sauce", "Kg"),
-    ("SAUCE", "BBQ Sauce", "Kg"), ("SAUCE", "Garlic Aioli Sauce", "Kg"),
-    ("PREMIXES", "Pizza Sauce Premix", "Pkts"), ("PREMIXES", "Bang Bang Dips Sauce Premix", "Pkts"),
-    ("PREMIXES", "Right Back Sauce Premix", "Pkts"), ("PREMIXES", "Bang Bang For Burger Sauce Premix", "Pkts"),
-    ("PREMIXES", "Mushroom Sauce Premix", "Pkts"), ("PREMIXES", "BBQ Sauce Premix", "Pkts"),
-    ("PREMIXES", "Chicken Marination Premix", "Pkts"), ("PREMIXES", "Garlic Aioli Sauce Premix", "Pkts"),
-    ("PREMIXES", "Empress Masala", "Kg"),
-    ("MASALA", "Chicken Powder", "Kg"), ("MASALA", "Black Pepper", "Kg"), ("MASALA", "Paprika Powder", "Kg"),
-    ("MASALA", "Garlic Powder", "Kg"), ("MASALA", "Onion Powder", "Kg"), ("MASALA", "Red Chilli Powder", "Kg"),
-    ("MASALA", "Chilli Flakes", "Kg"), ("MASALA", "Baking Powder", "Kg"), ("MASALA", "Salt", "Kg"),
-    ("MASALA", "Sugar", "Kg"), ("MASALA", "Pistachio", "Kg"), ("MASALA", "Cashew", "Kg"),
-    ("VEGETABLES", "Tomatoes", "Kg"), ("VEGETABLES", "Rocket Leaves", "Kg"), ("VEGETABLES", "Okra", "Kg"),
-    ("VEGETABLES", "Basil Leaves", "Kg"), ("VEGETABLES", "Garlic", "Kg"), ("VEGETABLES", "Onion", "Kg"),
-    ("VEGETABLES", "Ice Berg", "Kg"), ("VEGETABLES", "Baby Potatoes", "Kg"), ("VEGETABLES", "Mushrooms", "Pkts"),
-    ("VEGETABLES", "Cucumber", "Kg"), ("VEGETABLES", "Lemon", "Kg"), ("VEGETABLES", "Mint", "Kg"),
-    ("VEGETABLES", "Green Chilli", "Kg"),
-    ("GROCERIES", "Hellman's Mayonese", "Pkts"), ("GROCERIES", "Young's Mayonese", "Pkts"),
-    ("GROCERIES", "Peri Peri Mild", "Bottle"), ("GROCERIES", "Baffalo Sauce", "Bottle"),
-    ("GROCERIES", "Garlic Sachet ( Dippit )", "Pkts"), ("GROCERIES", "Tomato Sachet ( Dippit )", "Pkts"),
-    ("GROCERIES", "Knorr Ketchup ( 06-kg )", "Pkts"), ("GROCERIES", "Mustard ( Rose Morrow )", "Kg"),
-    ("GROCERIES", "Milk 01-Ltr ( Olpers )", "Ltrs"), ("GROCERIES", "Fresh Cream ( Nestle )", "Pkts"),
-    ("GROCERIES", "Maida", "Kg"), ("GROCERIES", "Honey", "Kg"), ("GROCERIES", "Vineger", "Bottle"),
-    ("GROCERIES", "Jalapenoes", "Tin"), ("GROCERIES", "Butter Margrin", "Kg"),
-    ("GROCERIES", "Meezan ( 01-Ltrs ) Pkts", "Ltrs"), ("GROCERIES", "Meezan ( 16-Ltrs ) Tin", "Tin"),
-    ("GROCERIES", "Olive Oil", "Ltrs"), ("GROCERIES", "Floor Cleaner", "Bottle"), ("GROCERIES", "Bleach", ""),
-    ("GROCERIES", "Lemon Max", "Pouch"), ("GROCERIES", "Hand Sanitizer", "Kg"), ("GROCERIES", "Glint", "Bottle"),
-    ("GROCERIES", "Foam For Dishwashing", "Nos"), ("GROCERIES", "Jalli For Dishwashing", "Nos"),
-    ("GROCERIES", "Forks", "Pkts"), ("GROCERIES", "Straw ( Cover )", "Pkts"), ("GROCERIES", "Straw ( Drinks )", "Pkts"),
-    ("GROCERIES", "ICE ( Drinks )", "Kg"), ("GROCERIES", "Wrapping Roll", "Roll"), ("GROCERIES", "Dips", "Nos"),
-    ("GROCERIES", "Disp Glass", "Pkts"), ("GROCERIES", "Disp Plates", "Pkts"), ("GROCERIES", "Mask", "Pkts"),
-    ("GROCERIES", "Hair Nets ( Caps )", "Pkts"), ("GROCERIES", "Gloves", "Pkts"), ("GROCERIES", "Gloves Vinyle", "Pkts"),
-    ("GROCERIES", "Hand Wash ( Lequid )", "Bottle"), ("GROCERIES", "Harpic ( Lequid )", "Bottle"),
-    ("GROCERIES", "Napkins", "Nos"), ("GROCERIES", "Toilet Paper", "Nos"), ("GROCERIES", "Basket Liner Roll", "Roll"),
-    ("GROCERIES", "Duster", "Kg"), ("GROCERIES", "Black Olives", "Bottle"), ("GROCERIES", "Mortien", "Bottle"),
-    ("GROCERIES", "Large Zipper", "Kg"), ("GROCERIES", "Medium Zipper", "Kg"), ("GROCERIES", "Small Zipper", "Kg"),
-    ("GROCERIES", "Printer Rolls", "Roll"), ("GROCERIES", "MRD Rolls", "Roll"),
-    ("ALUMUNIUM FOIL", "Alumunium Foil", "Roll"), ("ALUMUNIUM FOIL", "F2", "Pcs"),
-    ("PACKAGING", "Pizza Tray ( Dine In )", "Nos"), ("PACKAGING", "Pizza Box", "Nos"),
-    ("PACKAGING", "Take Away Bags", "Nos"), ("PACKAGING", "Fries Pouch ( Cup )", "Nos"),
-    ("PACKAGING", "Baby Loader Box", "Nos"), ("PACKAGING", "Glass ( Drinks )", "Nos"), ("PACKAGING", "Butter Paper", "Nos"),
-    ("DRINKS", "Pepsi Can", "Cases"), ("DRINKS", "Pepsi Diet Can", "Cases"), ("DRINKS", "7up Can", "Cases"),
-    ("DRINKS", "7up Diet Can", "Cases"), ("DRINKS", "Water 500 ML", "Cases"), ("DRINKS", "LPG Cylender", "Nos"),
-    ("DRINKS", "Demand Sheet", "Nos"),
-    ("ICED DRINKS", "Peach FIZZ", "ML"), ("ICED DRINKS", "Blackberry FIZZ", "ML"), ("ICED DRINKS", "Apple FIZZ", "ML"),
-]
-
+# NOTE: The workbook's "Store" tab is not currently present (only "Kitchen"
+# exists as of the last review). Store tracking is left out until that tab
+# comes back — re-add a STORE_ITEMS list + "Store" entry in SHEET_TYPES then.
 KITCHEN_ITEMS = [
     ("MEAT", "Beef", "KG"), ("MEAT", "Beef Pepperoni ( 200-Gram )", "KG"), ("MEAT", "Beef Bacon", "KG"),
-    ("CHICKEN", "Burger Chicken", "Grams"), ("CHICKEN", "Pizza Chicken", "Grams"),
+    ("CHICKEN", "Burger Chicken", "KG"), ("CHICKEN", "Pizza Chicken", "KG"),
     ("BUNS & DOUGH", "Buns", "Nos"), ("BUNS & DOUGH", "Dough", "Nos"),
     ("CHEESE", "Cheese Slice Yellow", "KG"), ("CHEESE", "Cheese Slice White", "KG"), ("CHEESE", "Pizza Cheese", "KG"),
     ("FRIES", "Fries", "Kg"),
@@ -160,16 +110,23 @@ KITCHEN_ITEMS = [
     ("VEGETABLES", "Green Chillies", "Kg"),
     ("GROCERIES", "Young's Mayonese", "KG"), ("GROCERIES", "Peri Peri Mild", "Bottle"),
     ("GROCERIES", "Baffalo Sauce", "Bottle"), ("GROCERIES", "Knorr Ketchup", "Kg"), ("GROCERIES", "Mustard", "Kg"),
-    ("GROCERIES", "Milk 01-Ltr", "Ltrs"), ("GROCERIES", "Cream", "Pkts"), ("GROCERIES", "Maida", "Kg"),
+    ("GROCERIES", "Milk", "Ltrs"), ("GROCERIES", "Cream", "Pkts"), ("GROCERIES", "Maida", "Kg"),
     ("GROCERIES", "Honey", "Kg"), ("GROCERIES", "Vineger", "Kg"), ("GROCERIES", "Jalapenoes", "Tin"),
-    ("GROCERIES", "Butter Margrin", "Kg"), ("GROCERIES", "Oil 1 Liter", "Ltrs"),
-    ("GROCERIES", "Meezan ( 16-Ltrs ) Tin", "Ltrs"), ("GROCERIES", "Olive Oil", "Ltrs"),
+    ("GROCERIES", "Butter Margrin", "Kg"), ("GROCERIES", "Oil 1 Liter", "Ltrs"), ("GROCERIES", "Oil Tin", "Ltrs"),
+    ("GROCERIES", "Olive Oil", "Ltrs"),
     ("ALUMUNIUM FOIL", "Alumunium Foil", "Roll"), ("ALUMUNIUM FOIL", "Black Olives", "Tin"), ("ALUMUNIUM FOIL", "F2", "Pcs"),
     ("ICED DRINKS", "Peach FIZZ", "ML"), ("ICED DRINKS", "Blackberry FIZZ", "ML"), ("ICED DRINKS", "Apple FIZZ", "ML"),
+    ("PACKAGING", "Pizza Tray ( Dine In )", "Nos"), ("PACKAGING", "Pizza Box", "Nos"),
+    ("PACKAGING", "Take Away Bags", "Nos"), ("PACKAGING", "Fries Pouch ( Cup )", "Nos"),
+    ("PACKAGING", "Baby Loader Box", "Nos"), ("PACKAGING", "Glass ( Drinks )", "Nos"), ("PACKAGING", "Butter Paper", "Nos"),
+    ("DRINKS", "Pepsi Can", "Can"), ("DRINKS", "Pepsi Diet Can", "Can"), ("DRINKS", "7up Can", "Can"),
+    ("DRINKS", "7up Diet Can", "Can"), ("DRINKS", "Mirinda Can", "Can"), ("DRINKS", "Mirinda Diet", "Can"),
+    ("DRINKS", "7up 1.5 Liter", "Ltr"), ("DRINKS", "Murrey Sparkling Water", "Bottle"),
+    ("DRINKS", "Big Apple", "Can"), ("DRINKS", "Lemon Malt", "Can"), ("DRINKS", "Peach Malt", "Can"),
+    ("GAS", "LPG Cylender", "Nos"),
 ]
 
 SHEET_TYPES = {
-    "Store": {"items": STORE_ITEMS, "worksheet": "Store Inventory", "in_label": "Purchases", "out_label": "Issued Items"},
     "Kitchen": {"items": KITCHEN_ITEMS, "worksheet": "Kitchen Inventory", "in_label": "Received Items", "out_label": "Used"},
 }
 
@@ -232,8 +189,8 @@ def fetch_previous_closing(branch_name, sheet_type, before_date):
             latest_per_item[item] = (row_date, r[8])
     return {item: val for item, (_, val) in latest_per_item.items()}
 
-def save_inventory(branch_name, sheet_type, date_str_sheet, rows, meta_rows):
-    """Upserts every item row (and the Prepared/Manager/Approved meta rows) for this date."""
+def save_inventory(branch_name, sheet_type, date_str_sheet, rows):
+    """Upserts every item row for this date (deletes any existing rows for the date first)."""
     ws = get_or_create_worksheet(branch_name, sheet_type)
     if not ws:
         return False
@@ -242,7 +199,7 @@ def save_inventory(branch_name, sheet_type, date_str_sheet, rows, meta_rows):
         if len(all_values) > 1:
             to_delete = [i + 1 for i, r in enumerate(all_values) if r and r[0] == date_str_sheet]
             batch_delete_rows(ws, to_delete)
-        with_backoff(ws.append_rows, rows + meta_rows)
+        with_backoff(ws.append_rows, rows)
         return True
     except Exception as e:
         st.error(f"Inventory Sheet Error: {e}")
@@ -310,7 +267,6 @@ if st.session_state.get("sk_loaded_for") != selection_key:
             data[item] = {"Opening": parse_num(prev_closing.get(item, 0)), "In": 0, "Out": 0, "Closing": 0, "Remarks": ""}
 
     st.session_state.sk_data = data
-    st.session_state.sk_meta = draft.get("_meta", {"prepared_by": "", "manager": "", "approved_by": ""})
     st.session_state.sk_loaded_for = selection_key
     if existing:
         st.info(f"↩️ Loaded previously saved {sheet_type} closing for {date_str_sheet}.")
@@ -319,7 +275,6 @@ if st.session_state.get("sk_loaded_for") != selection_key:
 
 def save_draft():
     payload = dict(st.session_state.sk_data)
-    payload["_meta"] = st.session_state.sk_meta
     try:
         localS.setItem(storage_key, json.dumps(payload), key=f"set_{storage_key}")
     except Exception:
@@ -382,15 +337,6 @@ for cat in categories:
 
         st.dataframe(pd.DataFrame(preview_rows), hide_index=True, use_container_width=True)
 
-st.divider()
-
-# ---------- FOOTER META ----------
-st.subheader("✍️ Sign-off")
-m1, m2, m3 = st.columns(3)
-prepared_by = m1.text_input("Prepared By", value=st.session_state.sk_meta.get("prepared_by", ""))
-manager = m2.text_input("Manager", value=st.session_state.sk_meta.get("manager", ""))
-approved_by = m3.text_input("Approved By", value=st.session_state.sk_meta.get("approved_by", ""))
-st.session_state.sk_meta = {"prepared_by": prepared_by, "manager": manager, "approved_by": approved_by}
 save_draft()
 
 # ---------- DISCREPANCY SUMMARY ----------
@@ -415,13 +361,7 @@ if st.button("💾 Save Inventory Count", type="primary", use_container_width=Tr
             d["Opening"], d["In"], total, d["Out"], d["Closing"], difference, d["Remarks"],
         ])
 
-    meta_rows = [
-        [date_str_sheet, "_META", "Prepared By", "", "", "", "", "", "", "", prepared_by],
-        [date_str_sheet, "_META", "Manager", "", "", "", "", "", "", "", manager],
-        [date_str_sheet, "_META", "Approved By", "", "", "", "", "", "", "", approved_by],
-    ]
-
-    if save_inventory(branch, sheet_type, date_str_sheet, rows, meta_rows):
+    if save_inventory(branch, sheet_type, date_str_sheet, rows):
         st.success(f"Saved {sheet_type} closing for {branch} — {date_str_sheet}.")
         try:
             localS.deleteItem(storage_key, key=f"del_{storage_key}")
