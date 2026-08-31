@@ -20,7 +20,10 @@ st.markdown("""
 
 # ---------- GOOGLE SHEETS CORE ----------
 
+@st.cache_resource(show_spinner=False)
 def get_gspread_client():
+    """Cached so the service-account handshake happens once per session, not on
+    every rerun — the grid reruns the whole script on each cell edit."""
     try:
         SCOPES = [
             "https://www.googleapis.com/auth/spreadsheets",
@@ -84,6 +87,11 @@ def parse_num(val):
     except (TypeError, ValueError):
         return 0.0
 
+def r3(val):
+    """Rounds to 3dp before comparing — raw float math produces dust like
+    0.1 + 0.2 != 0.3, which would otherwise flag clean rows as impossible."""
+    return round(float(val), 3)
+
 # ---------- ITEM MASTER (from "Store & Kitchen Daily Closing.xlsx") ----------
 
 # NOTE: The workbook's "Store" tab is not currently present (only "Kitchen"
@@ -110,7 +118,7 @@ KITCHEN_ITEMS = [
     ("VEGETABLES", "Green Chillies", "Kg"),
     ("GROCERIES", "Young's Mayonese", "KG"), ("GROCERIES", "Peri Peri Mild", "Bottle"),
     ("GROCERIES", "Baffalo Sauce", "Bottle"), ("GROCERIES", "Knorr Ketchup", "Kg"), ("GROCERIES", "Mustard", "Kg"),
-    ("GROCERIES", "Milk", "Ltrs"), ("GROCERIES", "Cream", "Pkts"), ("GROCERIES", "Maida", "Kg"),
+    ("GROCERIES", "Milk 01-Ltr", "Ltrs"), ("GROCERIES", "Cream", "Pkts"), ("GROCERIES", "Maida", "Kg"),
     ("GROCERIES", "Honey", "Kg"), ("GROCERIES", "Vineger", "Kg"), ("GROCERIES", "Jalapenoes", "Tin"),
     ("GROCERIES", "Butter Margrin", "Kg"), ("GROCERIES", "Oil 1 Liter", "Ltrs"), ("GROCERIES", "Oil Tin", "Ltrs"),
     ("GROCERIES", "Olive Oil", "Ltrs"),
@@ -127,13 +135,34 @@ KITCHEN_ITEMS = [
 ]
 
 SHEET_TYPES = {
-    "Kitchen": {"items": KITCHEN_ITEMS, "worksheet": "Kitchen Inventory", "in_label": "Received Items", "out_label": "Used"},
+    "Kitchen": {"items": KITCHEN_ITEMS, "worksheet": "Kitchen Inventory", "in_label": "Received"},
 }
 
 HEADER = [
-    "Date", "Category", "Item", "Unit", "Opening Stock", "In (Purchases/Received)",
-    "Total", "Out (Issued/Used)", "Closing Stock", "Difference", "Remarks / Demand",
+    "Date", "Category", "Item", "Unit",
+    "Opening Stock", "Adjustment", "Received", "Available",
+    "Wastage", "Staff Meal", "Closing Stock", "Consumption (Derived)",
+    "Remarks / Demand", "Saved At",
 ]
+
+# Column positions in the sheet row, so the readers below stay readable.
+C_DATE, C_ITEM = 0, 2
+C_OPENING, C_ADJUST, C_RECEIVED = 4, 5, 6
+C_WASTAGE, C_STAFF, C_CLOSING = 8, 9, 10
+C_REMARKS = 12
+
+def compute(d):
+    """The whole point of the sheet: consumption is DERIVED, never typed.
+
+        Available   = Opening + Adjustment + Received
+        Consumption = Available - Wastage - Staff Meal - Closing
+
+    Because nobody can type Consumption, it cannot be plugged to make the
+    day look tidy — the only inputs are what physically arrived and what is
+    physically on the shelf."""
+    available = d["Opening"] + d["Adjust"] + d["Received"]
+    consumption = available - d["Wastage"] - d["StaffMeal"] - d["Closing"]
+    return available, consumption
 
 # ---------- SHEET HELPERS ----------
 
@@ -146,58 +175,65 @@ def get_or_create_worksheet(branch_name, sheet_type):
         return spreadsheet.worksheet(title)
     except gspread.exceptions.WorksheetNotFound:
         ws = spreadsheet.add_worksheet(title=title, rows="4000", cols=str(len(HEADER)))
-        ws.append_row(HEADER)
+        with_backoff(ws.append_row, HEADER)
         return ws
 
-def fetch_day_records(branch_name, sheet_type, date_str_sheet):
-    """Returns {item_name: row_dict} for an already-saved date, or {} if none."""
+def load_sheet_state(branch_name, sheet_type, target_date, date_str):
+    """One read of the worksheet answers all three questions we have:
+       - is there a saved count for this exact date? (edit mode)
+       - what did each item close at on the most recent earlier date? (carry-forward)
+       - is there any history at all before this date? (first-ever count / seed mode)"""
     ws = get_or_create_worksheet(branch_name, sheet_type)
     if not ws:
-        return {}
-    records = ws.get_all_values()
-    if len(records) < 2:
-        return {}
-    out = {}
-    for r in records[1:]:
-        if len(r) >= 11 and r[0] == date_str_sheet:
-            out[r[2]] = {
-                "Opening": r[4], "In": r[5], "Out": r[7], "Closing": r[8], "Remarks": r[10],
-            }
-    return out
+        return {}, {}, False
+    values = with_backoff(ws.get_all_values)
+    if not values:
+        return {}, {}, False
 
-def fetch_previous_closing(branch_name, sheet_type, before_date):
-    """Returns {item_name: closing_stock} from the most recent saved date strictly before `before_date`."""
-    ws = get_or_create_worksheet(branch_name, sheet_type)
-    if not ws:
-        return {}
-    records = ws.get_all_values()
-    if len(records) < 2:
-        return {}
-    latest_per_item = {}  # item -> (date_obj, closing_val)
-    for r in records[1:]:
-        if len(r) < 11:
+    # Header drift check costs nothing here — we already have row 1 in hand.
+    if values[0] != HEADER:
+        if len(values) <= 1:
+            with_backoff(ws.update, range_name="A1", values=[HEADER])
+        else:
+            st.warning(
+                "⚠️ This worksheet was written by an older version of this page and its "
+                "columns no longer match. Rename or archive the existing "
+                f"'{SHEET_TYPES[sheet_type]['worksheet']}' tab so a fresh one can be created."
+            )
+
+    existing, latest = {}, {}  # latest: item -> (date, closing)
+    has_history = False
+    for row in values[1:]:
+        if len(row) <= C_REMARKS:
             continue
+        if row[C_DATE] == date_str:
+            existing[row[C_ITEM]] = {
+                "Opening": row[C_OPENING], "Adjust": row[C_ADJUST], "Received": row[C_RECEIVED],
+                "Wastage": row[C_WASTAGE], "StaffMeal": row[C_STAFF], "Closing": row[C_CLOSING],
+                "Remarks": row[C_REMARKS],
+            }
         try:
-            row_date = datetime.strptime(r[0], "%m/%d/%Y").date()
+            row_date = datetime.strptime(row[C_DATE], "%m/%d/%Y").date()
         except ValueError:
             continue
-        if row_date >= before_date:
-            continue
-        item = r[2]
-        prev = latest_per_item.get(item)
-        if prev is None or row_date > prev[0]:
-            latest_per_item[item] = (row_date, r[8])
-    return {item: val for item, (_, val) in latest_per_item.items()}
+        if row_date < target_date:
+            has_history = True
+            item = row[C_ITEM]
+            prev = latest.get(item)
+            if prev is None or row_date > prev[0]:
+                latest[item] = (row_date, row[C_CLOSING])
 
-def save_inventory(branch_name, sheet_type, date_str_sheet, rows):
+    return existing, {k: v[1] for k, v in latest.items()}, has_history
+
+def save_inventory(branch_name, sheet_type, date_str, rows):
     """Upserts every item row for this date (deletes any existing rows for the date first)."""
     ws = get_or_create_worksheet(branch_name, sheet_type)
     if not ws:
         return False
     try:
-        all_values = ws.get_all_values()
+        all_values = with_backoff(ws.get_all_values)
         if len(all_values) > 1:
-            to_delete = [i + 1 for i, r in enumerate(all_values) if r and r[0] == date_str_sheet]
+            to_delete = [i + 1 for i, r in enumerate(all_values) if r and r[0] == date_str]
             batch_delete_rows(ws, to_delete)
         with_backoff(ws.append_rows, rows)
         return True
@@ -237,7 +273,7 @@ categories = list(dict.fromkeys(cat for cat, _, _ in items))  # preserves first-
 # ---------- LOAD / DRAFT STATE ----------
 localS = LocalStorage(key="klap_sk_storage")
 selection_key = f"{branch}|{sheet_type}|{date_selected.strftime('%d%m%y')}"
-storage_key = f"sk_draft_{selection_key}"
+storage_key = f"sk_draft_v2_{selection_key}"
 
 if st.session_state.get("sk_loaded_for") != selection_key:
     raw_draft = None
@@ -252,49 +288,81 @@ if st.session_state.get("sk_loaded_for") != selection_key:
         except (TypeError, ValueError):
             draft = {}
 
-    existing = fetch_day_records(branch, sheet_type, date_str_sheet)
-    prev_closing = fetch_previous_closing(branch, sheet_type, date_selected) if not existing else {}
+    existing, prev_closing, has_history = load_sheet_state(branch, sheet_type, date_selected, date_str_sheet)
 
     data = {}
     for cat, item, unit in items:
-        if item in draft:
-            d = draft[item]
-            data[item] = {"Opening": d.get("Opening", 0), "In": d.get("In", 0), "Out": d.get("Out", 0), "Closing": d.get("Closing", 0), "Remarks": d.get("Remarks", "")}
-        elif item in existing:
-            e = existing[item]
-            data[item] = {"Opening": parse_num(e["Opening"]), "In": parse_num(e["In"]), "Out": parse_num(e["Out"]), "Closing": parse_num(e["Closing"]), "Remarks": e["Remarks"]}
+        src = draft.get(item) or existing.get(item)
+        if src:
+            data[item] = {
+                "Opening": parse_num(src.get("Opening")), "Adjust": parse_num(src.get("Adjust")),
+                "Received": parse_num(src.get("Received")), "Wastage": parse_num(src.get("Wastage")),
+                "StaffMeal": parse_num(src.get("StaffMeal")), "Closing": parse_num(src.get("Closing")),
+                "Remarks": src.get("Remarks", "") or "",
+            }
         else:
-            data[item] = {"Opening": parse_num(prev_closing.get(item, 0)), "In": 0, "Out": 0, "Closing": 0, "Remarks": ""}
+            data[item] = {
+                "Opening": parse_num(prev_closing.get(item, 0)), "Adjust": 0.0, "Received": 0.0,
+                "Wastage": 0.0, "StaffMeal": 0.0, "Closing": 0.0, "Remarks": "",
+            }
 
     st.session_state.sk_data = data
+    st.session_state.sk_seed_mode = not has_history
     st.session_state.sk_loaded_for = selection_key
+
     if existing:
-        st.info(f"↩️ Loaded previously saved {sheet_type} closing for {date_str_sheet}.")
+        st.info(f"↩️ Loaded the saved {sheet_type} count for {date_str_sheet}.")
     elif prev_closing:
-        st.info("↩️ Opening Stock pre-filled from the previous saved day's Closing Stock.")
+        st.info("↩️ Opening Stock carried forward from the previous count.")
+
+seed_mode = st.session_state.get("sk_seed_mode", False)
 
 def save_draft():
-    payload = dict(st.session_state.sk_data)
     try:
-        localS.setItem(storage_key, json.dumps(payload), key=f"set_{storage_key}")
+        localS.setItem(storage_key, json.dumps(st.session_state.sk_data), key=f"set_{storage_key}")
     except Exception:
         pass
 
 st.caption(f"{sheet_type} count sheet · {branch} · {date_str_sheet}")
 
+if seed_mode:
+    st.warning(
+        "🌱 **Baseline count** — there is no earlier count on record, so **Opening Stock is open "
+        "for entry this once**. Count every item physically and type what is actually on the shelf "
+        "into Opening Stock. Every future day carries forward from here, so take the time to get it right."
+    )
+else:
+    st.caption(
+        "Opening Stock is locked — it carries forward from the last count so the day-to-day chain "
+        "can't be broken. Genuine corrections (found stock, a delivery booked to the wrong day, a new "
+        "item) go in **Adjustment**, which requires a reason in Remarks. **Consumption is calculated**, "
+        "not typed: Opening + Adjustment + Received − Wastage − Staff Meal − Closing."
+    )
+
 # ---------- CATEGORY GRIDS ----------
-grand_total_diff = 0
-mismatched_items = []
+COLUMN_ORDER = ["Item", "Unit", "Opening", "Adjust", "Received", "Available",
+                "Wastage", "StaffMeal", "Closing", "Consumption", "Remarks"]
+
+locked_cols = ["Item", "Unit", "Available", "Consumption"]
+if not seed_mode:
+    locked_cols.append("Opening")
+
+impossible_rows = []      # closing + wastage + staff meal exceeds what was available
+adjust_no_reason = []     # adjustment entered with no explanation
+untouched = 0             # rows with no movement at all — a hint the count wasn't done
 
 for cat in categories:
     cat_items = [(item, unit) for c, item, unit in items if c == cat]
     df_rows = []
     for item, unit in cat_items:
         d = st.session_state.sk_data[item]
+        available, consumption = compute(d)
         df_rows.append({
             "Item": item, "Unit": unit,
-            "Opening": d["Opening"], cfg["in_label"]: d["In"],
-            cfg["out_label"]: d["Out"], "Closing": d["Closing"],
+            "Opening": d["Opening"], "Adjust": d["Adjust"], "Received": d["Received"],
+            "Available": available,
+            "Wastage": d["Wastage"], "StaffMeal": d["StaffMeal"], "Closing": d["Closing"],
+            "Consumption": consumption,
             "Remarks": d["Remarks"],
         })
     df = pd.DataFrame(df_rows)
@@ -306,66 +374,120 @@ for cat in categories:
             hide_index=True,
             use_container_width=True,
             num_rows="fixed",
-            disabled=["Item", "Unit"],
+            column_order=COLUMN_ORDER,
+            disabled=locked_cols,
             column_config={
-                "Opening": st.column_config.NumberColumn("Opening Stock", min_value=0, step=1),
-                cfg["in_label"]: st.column_config.NumberColumn(cfg["in_label"], min_value=0, step=1),
-                cfg["out_label"]: st.column_config.NumberColumn(cfg["out_label"], min_value=0, step=1),
-                "Closing": st.column_config.NumberColumn("Closing Stock", min_value=0, step=1),
-                "Remarks": st.column_config.TextColumn("Remarks / Demand"),
+                "Item": st.column_config.TextColumn("Item", width="medium"),
+                "Unit": st.column_config.TextColumn("Unit", width="small"),
+                "Opening": st.column_config.NumberColumn("Opening", min_value=0, format="%.2f", width="small"),
+                "Adjust": st.column_config.NumberColumn(
+                    "Adjustment", format="%.2f", width="small",
+                    help="Correction to opening stock (+/-). A reason in Remarks is required.",
+                ),
+                "Received": st.column_config.NumberColumn(
+                    cfg["in_label"], min_value=0, format="%.2f", width="small",
+                    help="Stock received from the store or a vendor today.",
+                ),
+                "Available": st.column_config.NumberColumn(
+                    "Available", format="%.2f", width="small",
+                    help="Calculated: Opening + Adjustment + Received.",
+                ),
+                "Wastage": st.column_config.NumberColumn(
+                    "Wastage", min_value=0, format="%.2f", width="small",
+                    help="Spoiled, burnt or discarded. Keeping this separate stops it looking like theft.",
+                ),
+                "StaffMeal": st.column_config.NumberColumn(
+                    "Staff Meal", min_value=0, format="%.2f", width="small",
+                    help="Consumed by staff or given as a complimentary.",
+                ),
+                "Closing": st.column_config.NumberColumn(
+                    "Closing", min_value=0, format="%.2f", width="small",
+                    help="What you physically counted on the shelf.",
+                ),
+                "Consumption": st.column_config.NumberColumn(
+                    "Consumption", format="%.2f", width="small",
+                    help="Calculated, not typed: Available − Wastage − Staff Meal − Closing.",
+                ),
+                "Remarks": st.column_config.TextColumn("Remarks / Demand", width="medium"),
             },
         )
 
-        # write edits back into session state + compute Total/Difference for the preview
-        preview_rows = []
+        # push edits back into session state; everything derived is recomputed from them
         for _, row in edited.iterrows():
             item = row["Item"]
-            opening = parse_num(row["Opening"])
-            in_amt = parse_num(row[cfg["in_label"]])
-            out_amt = parse_num(row[cfg["out_label"]])
-            closing = parse_num(row["Closing"])
-            remarks = row["Remarks"] or ""
+            d = {
+                "Opening": parse_num(row["Opening"]), "Adjust": parse_num(row["Adjust"]),
+                "Received": parse_num(row["Received"]), "Wastage": parse_num(row["Wastage"]),
+                "StaffMeal": parse_num(row["StaffMeal"]), "Closing": parse_num(row["Closing"]),
+                "Remarks": row["Remarks"] or "",
+            }
+            st.session_state.sk_data[item] = d
 
-            st.session_state.sk_data[item] = {"Opening": opening, "In": in_amt, "Out": out_amt, "Closing": closing, "Remarks": remarks}
-
-            total = opening + in_amt
-            difference = total - out_amt - closing
-            if difference != 0:
-                mismatched_items.append((item, difference))
-            grand_total_diff += difference
-            preview_rows.append({"Item": item, "Total": total, "Difference": difference})
-
-        st.dataframe(pd.DataFrame(preview_rows), hide_index=True, use_container_width=True)
+            available, consumption = compute(d)
+            if r3(consumption) < 0:
+                impossible_rows.append({"Item": item, "Available": available, "Short by": -consumption})
+            if r3(d["Adjust"]) != 0 and not str(d["Remarks"]).strip():
+                adjust_no_reason.append({"Item": item, "Adjustment": d["Adjust"]})
+            if all(r3(d[k]) == 0 for k in ("Adjust", "Received", "Wastage", "StaffMeal")) and r3(consumption) == 0:
+                untouched += 1
 
 save_draft()
 
-# ---------- DISCREPANCY SUMMARY ----------
-if mismatched_items:
-    st.warning(f"⚠️ {len(mismatched_items)} item(s) have a non-zero Difference (Total − Out − Closing). Review before saving.")
-    with st.expander("View discrepancies"):
-        st.dataframe(pd.DataFrame(mismatched_items, columns=["Item", "Difference"]), hide_index=True, use_container_width=True)
-else:
-    st.success("✅ All items reconcile (Difference = 0).")
+# ---------- REVIEW BEFORE SAVING ----------
+st.divider()
+st.subheader("🔎 Review")
+
+blocking = bool(impossible_rows or adjust_no_reason)
+
+if impossible_rows:
+    st.error(
+        f"❌ {len(impossible_rows)} item(s) count higher than what was available. That is physically "
+        "impossible, so it is either a delivery that was never entered in Received, or a miscount. "
+        "Fix these before saving — a wrong closing figure becomes tomorrow's wrong opening."
+    )
+    st.dataframe(pd.DataFrame(impossible_rows), hide_index=True, use_container_width=True)
+
+if adjust_no_reason:
+    st.error(
+        f"❌ {len(adjust_no_reason)} item(s) have an Adjustment with no reason in Remarks. "
+        "An unexplained adjustment is exactly what this column exists to prevent."
+    )
+    st.dataframe(pd.DataFrame(adjust_no_reason), hide_index=True, use_container_width=True)
+
+if not blocking:
+    st.success("✅ Nothing blocking — the count is arithmetically sound.")
+
+if untouched:
+    st.caption(
+        f"ℹ️ {untouched} of {len(items)} items show no movement at all today "
+        "(nothing received, nothing consumed). Normal for slow-moving stock — worth a second look "
+        "if the number is high."
+    )
 
 st.divider()
 
 # ---------- SAVE ----------
-if st.button("💾 Save Inventory Count", type="primary", use_container_width=True):
+if st.button("💾 Save Inventory Count", type="primary", use_container_width=True, disabled=blocking):
+    saved_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     rows = []
     for cat, item, unit in items:
         d = st.session_state.sk_data[item]
-        total = d["Opening"] + d["In"]
-        difference = total - d["Out"] - d["Closing"]
+        available, consumption = compute(d)
         rows.append([
             date_str_sheet, cat, item, unit,
-            d["Opening"], d["In"], total, d["Out"], d["Closing"], difference, d["Remarks"],
+            d["Opening"], d["Adjust"], d["Received"], available,
+            d["Wastage"], d["StaffMeal"], d["Closing"], consumption,
+            d["Remarks"], saved_at,
         ])
 
     if save_inventory(branch, sheet_type, date_str_sheet, rows):
-        st.success(f"Saved {sheet_type} closing for {branch} — {date_str_sheet}.")
+        st.success(f"Saved {sheet_type} count for {branch} — {date_str_sheet}.")
         try:
             localS.deleteItem(storage_key, key=f"del_{storage_key}")
         except Exception:
             pass
         st.session_state.sk_loaded_for = None
         st.rerun()
+
+if blocking:
+    st.caption("Saving is disabled until the errors above are resolved.")
