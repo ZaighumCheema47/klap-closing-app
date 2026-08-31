@@ -275,9 +275,14 @@ def save_inventory(branch_name, sheet_type, date_str, rows):
 
 st.title("📦 Daily Stock Count")
 
-with st.expander("⚙️ Branch, sheet & date", expanded=not st.session_state.get("sk_started")):
+with st.expander("⚙️ Branch & date", expanded=not st.session_state.get("sk_started")):
     branch = st.selectbox("Branch", list(BRANCH_CONFIG.keys()))
-    sheet_type = st.radio("Count sheet", list(SHEET_TYPES.keys()), horizontal=True)
+    # Only worth asking while there is more than one sheet to choose between —
+    # the picker reappears on its own once the Store tab is back in the workbook.
+    if len(SHEET_TYPES) > 1:
+        sheet_type = st.radio("Count sheet", list(SHEET_TYPES.keys()), horizontal=True)
+    else:
+        sheet_type = next(iter(SHEET_TYPES))
     date_selected = st.date_input("Closing date", datetime.today())
 
 date_str_sheet = date_selected.strftime("%m/%d/%Y")
@@ -342,7 +347,7 @@ if st.session_state.get("sk_loaded_for") != selection_key:
     st.session_state.sk_data = data
     st.session_state.sk_seed_mode = not has_history
     st.session_state.sk_loaded_for = selection_key
-    st.session_state.sk_cat = categories[0]
+    st.session_state.sk_cat = categories[0]  # safe here: set before the picker is built
 
     if existing:
         st.info(f"↩️ Loaded the saved count for {date_str_sheet}.")
@@ -351,6 +356,12 @@ if st.session_state.get("sk_loaded_for") != selection_key:
 
 seed_mode = st.session_state.get("sk_seed_mode", False)
 data = st.session_state.sk_data
+
+def wkey(prefix, item):
+    """Widget keys carry the branch/sheet/date so switching selection builds fresh
+    widgets. Without this, a value typed against one date stays in the widget and
+    silently overwrites the data loaded for the next one."""
+    return f"{prefix}_{selection_key}_{item}"
 
 def save_draft():
     try:
@@ -363,7 +374,7 @@ counted_items = [i for _, i, _ in items if data[i]["Closing"] is not None]
 total_items = len(items)
 done = len(counted_items)
 
-st.caption(f"**{branch}** · {sheet_type} · {date_str_sheet}")
+st.caption(f"**{branch}** · {date_str_sheet}" + (f" · {sheet_type}" if len(SHEET_TYPES) > 1 else ""))
 st.progress(done / total_items if total_items else 0.0, text=f"{done} of {total_items} items counted")
 
 if seed_mode:
@@ -387,17 +398,18 @@ if view == "📱 Count":
         mark = "✅" if n_done == len(picked) else ("🟡" if n_done else "⬜")
         return f"{mark} {c} — {n_done}/{len(picked)}"
 
-    current = st.session_state.get("sk_cat", categories[0])
-    if current not in categories:
-        current = categories[0]
+    if st.session_state.get("sk_cat") not in categories:
+        st.session_state.sk_cat = categories[0]
 
-    chosen = st.selectbox(
-        "Section", categories, index=categories.index(current),
-        format_func=cat_label, key="sk_cat_picker",
-    )
-    if chosen != current:
-        st.session_state.sk_cat = chosen
-        current = chosen
+    def step_section(delta):
+        """Runs as a button callback, which fires BEFORE the script reruns — the only
+        point at which a widget's own key may be reassigned. Setting it inline during
+        the run instead throws, which is what made Next look like it did nothing."""
+        i = categories.index(st.session_state.sk_cat) + delta
+        st.session_state.sk_cat = categories[max(0, min(i, len(categories) - 1))]
+
+    # The selectbox owns `sk_cat` outright — no second variable to fall out of sync.
+    current = st.selectbox("Section", categories, format_func=cat_label, key="sk_cat")
 
     st.divider()
 
@@ -417,7 +429,7 @@ if view == "📱 Count":
                 # Baseline day: one number per item, nothing else to ask for.
                 val = st.number_input(
                     "Stock on hand now", value=d["Closing"], min_value=0.0, step=1.0,
-                    format="%.2f", key=f"seed_{item}", placeholder="Enter count",
+                    format="%.2f", key=wkey("seed", item), placeholder="Enter count",
                 )
                 d["Opening"] = parse_num(val)
                 d["Closing"] = parse_opt(val)
@@ -428,32 +440,32 @@ if view == "📱 Count":
                 in_col, close_col = st.columns(2)
                 d["Received"] = parse_num(in_col.number_input(
                     cfg["in_label"], value=d["Received"], min_value=0.0, step=1.0,
-                    format="%.2f", key=f"rec_{item}",
+                    format="%.2f", key=wkey("rec", item),
                 ))
                 d["Closing"] = parse_opt(close_col.number_input(
                     "Closing count", value=d["Closing"], min_value=0.0, step=1.0,
-                    format="%.2f", key=f"cls_{item}", placeholder="Count",
+                    format="%.2f", key=wkey("cls", item), placeholder="Count",
                 ))
 
                 with st.expander("Wastage · staff meal · adjustment · remarks"):
                     w_col, s_col = st.columns(2)
                     d["Wastage"] = parse_num(w_col.number_input(
                         "Wastage", value=d["Wastage"], min_value=0.0, step=1.0,
-                        format="%.2f", key=f"wst_{item}",
+                        format="%.2f", key=wkey("wst", item),
                         help="Spoiled, burnt or discarded — kept separate so it doesn't look like theft.",
                     ))
                     d["StaffMeal"] = parse_num(s_col.number_input(
                         "Staff meal", value=d["StaffMeal"], min_value=0.0, step=1.0,
-                        format="%.2f", key=f"stf_{item}",
+                        format="%.2f", key=wkey("stf", item),
                         help="Eaten by staff or given as a complimentary.",
                     ))
                     d["Adjust"] = parse_num(st.number_input(
                         "Adjustment (+/-)", value=d["Adjust"], step=1.0, format="%.2f",
-                        key=f"adj_{item}",
+                        key=wkey("adj", item),
                         help="Correction to opening stock. A reason in Remarks is required.",
                     ))
                     d["Remarks"] = st.text_input(
-                        "Remarks / demand", value=d["Remarks"], key=f"rmk_{item}",
+                        "Remarks / demand", value=d["Remarks"], key=wkey("rmk", item),
                     )
 
                 available, consumption = compute(d)
@@ -469,12 +481,10 @@ if view == "📱 Count":
     st.divider()
     idx = categories.index(current)
     prev_col, next_col = st.columns(2)
-    if prev_col.button("◀ Previous", use_container_width=True, disabled=idx == 0):
-        st.session_state.sk_cat = categories[idx - 1]
-        st.rerun()
-    if next_col.button("Next ▶", use_container_width=True, disabled=idx == len(categories) - 1):
-        st.session_state.sk_cat = categories[idx + 1]
-        st.rerun()
+    prev_col.button("◀ Previous", use_container_width=True, disabled=idx == 0,
+                    on_click=step_section, args=(-1,))
+    next_col.button("Next ▶", use_container_width=True, disabled=idx == len(categories) - 1,
+                    on_click=step_section, args=(1,))
 
     if idx == len(categories) - 1:
         st.caption("Last section — switch to **📋 Review & Save** when you're done.")
