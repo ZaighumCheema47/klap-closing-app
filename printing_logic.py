@@ -1,11 +1,15 @@
 import streamlit.components.v1 as components
 
-def trigger_thermal_print(branch, date_display, cash_sales, card_sales, fp_sales, cc_tips, expenses, expected_cash, closing_code):
+def trigger_thermal_print(branch, date_display, cash_sales, card_sales, fp_sales, cc_tips, expenses, expected_cash, closing_code, opening_cash=0, handover=0):
     # Calculate Gross for the receipt
     gross_total = cash_sales + card_sales + fp_sales
     
     # NEW: Calculate Total Expenses
     total_expenses = sum(int(e['Amount']) for e in expenses)
+
+    # Everything that physically left the drawer. Tips are posted as their own
+    # expense row, so they are added here rather than counted twice.
+    cash_out = total_expenses + int(cc_tips)
     
     # Formatting expense rows
     expenses_html = "".join([
@@ -131,9 +135,23 @@ def trigger_thermal_print(branch, date_display, cash_sales, card_sales, fp_sales
         {f'<div class="row"><span>CC TIPS</span><span class="right">({int(cc_tips):,})</span></div>' if cc_tips > 0 else ''}
 
         <div class="line"></div>
+        <b class="section-title">CASH TILL</b>
+        <div class="row"><span>OPENING</span><span class="right">{int(opening_cash):,}</span></div>
+        <div class="row"><span>+ CASH SALE</span><span class="right">{int(cash_sales):,}</span></div>
+        <div class="row"><span>- PAID OUT</span><span class="right">({int(cash_out):,})</span></div>
+        {f'<div class="row"><span>- HANDOVER</span><span class="right">({int(handover):,})</span></div>' if handover > 0 else ''}
+
+        <div class="line"></div>
         <div class="total-box">
-            <div style="font-size: 15px;">CASH IN HAND</div>
+            <div style="font-size: 15px;">CLOSING IN TILL</div>
             <div class="total-val">Rs. {int(expected_cash):,}</div>
+        </div>
+
+        <div class="row" style="margin-top:8px; font-size: 11px;">
+            <span>COUNTED</span><span class="right">_____________</span>
+        </div>
+        <div class="row" style="font-size: 11px;">
+            <span>SIGN</span><span class="right">_____________</span>
         </div>
 
         <div class="center" style="margin-top:10px; font-size: 11px;">
