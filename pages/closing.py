@@ -95,6 +95,21 @@ def parse_money(val):
     clean_val = re.sub(r"[^\d]", "", str(val).split(".")[0])
     return int(clean_val) if clean_val else 0
 
+def parse_signed(val):
+    """Like parse_money, but keeps the minus sign.
+
+    parse_money strips every non-digit, so "-5,000" comes back as 5000. Till
+    balances can legitimately go negative when the drawer is short, and reading
+    a shortage back as a surplus would silently corrupt the carry-forward.
+    """
+    if val is None or not str(val).strip():
+        return 0
+    raw = str(val).split(".")[0].strip()
+    negative = raw.startswith("-") or (raw.startswith("(") and raw.endswith(")"))
+    digits = re.sub(r"[^\d]", "", raw)
+    amount = int(digits) if digits else 0
+    return -amount if negative else amount
+
 def upsert_sales_data(branch_name, daily_id, date_str, cash, card, fp, gross, cc_tips):
     """Saves/Updates the 'Sales' worksheet with Settlement vs POS reconciliation"""
     if client:
@@ -180,6 +195,78 @@ def upsert_closing(branch_name, custom_id, data_rows):
         except Exception as e:
             st.error(f"Expense Sheet Error: {e}")
     return False
+
+# ---------- CASH LEDGER ----------
+# The branch till is one running float, not a fresh pot each morning: cash sales
+# go in, expenses and handovers come out, and whatever is left opens the next
+# day. The Expenses tab only ever records outflows, so on its own it can never
+# answer "how much should be in the drawer right now". This tab carries the
+# balance forward so a bill paid out of several days' accumulated cash stops
+# looking like a negative day.
+
+LEDGER_SHEET = "CashLedger"
+LEDGER_HEADER = ["ID", "Date", "Opening", "Cash Sales", "Expenses", "Handover", "Closing"]
+
+def get_ledger_sheet(branch_name):
+    """Returns the CashLedger worksheet for a branch, creating it on first use."""
+    spreadsheet = client.open(get_sheet_title(branch_name))
+    try:
+        return spreadsheet.worksheet(LEDGER_SHEET)
+    except gspread.exceptions.WorksheetNotFound:
+        ws = spreadsheet.add_worksheet(
+            title=LEDGER_SHEET, rows="2000", cols=str(len(LEDGER_HEADER))
+        )
+        with_backoff(ws.append_row, LEDGER_HEADER)
+        return ws
+
+def fetch_opening_cash(branch_name, date_selected, current_id):
+    """Closing balance of the latest ledger row dated before the selected day.
+
+    Rows carrying the current ID are skipped, so re-posting a closing chains off
+    the day before it rather than off its own previous version. Returns None when
+    there is no history at all — the seed case, where the till has to be counted
+    by hand once.
+    """
+    if not client:
+        return None
+    try:
+        rows = with_backoff(get_ledger_sheet(branch_name).get_all_values)
+    except Exception as e:
+        st.warning(f"Could not read cash ledger ({e}). Enter the opening figure manually.")
+        return None
+
+    latest_date, latest_closing = None, None
+    for r in rows[1:]:
+        if len(r) < len(LEDGER_HEADER) or r[0] == current_id:
+            continue
+        try:
+            row_date = datetime.strptime(r[1], "%m/%d/%Y")
+        except (ValueError, TypeError):
+            continue
+        if row_date.date() >= date_selected:
+            continue
+        if latest_date is None or row_date > latest_date:
+            latest_date, latest_closing = row_date, parse_signed(r[6])
+    return latest_closing
+
+def upsert_cash_ledger(branch_name, daily_id, date_str, opening, cash_sales, cash_out, handover, closing):
+    """Saves this closing's till movement, replacing any earlier post of the same ID."""
+    if not client:
+        return False
+    try:
+        ws = get_ledger_sheet(branch_name)
+        records = with_backoff(ws.get_all_values)
+        if len(records) > 1:
+            rows_to_delete = [i + 1 for i, row in enumerate(records) if row and row[0] == daily_id]
+            batch_delete_rows(ws, rows_to_delete)
+        with_backoff(
+            ws.append_row,
+            [daily_id, date_str, opening, cash_sales, cash_out, handover, closing],
+        )
+        return True
+    except Exception as e:
+        st.error(f"Cash Ledger Error: {e}")
+        return False
 
 # ---------- UI LOGIC ----------
 
@@ -271,6 +358,8 @@ if st.session_state.get("loaded_draft_for") != storage_key:
     st.session_state.fp_in = draft.get("fp", "")
     st.session_state.tip_status = draft.get("tip_status", "No")
     st.session_state.tip_amt = draft.get("tip_amt", "")
+    st.session_state.opening_in = draft.get("opening", "")
+    st.session_state.handover_in = draft.get("handover", "")
     st.session_state.expenses = draft.get("expenses", [])
     st.session_state.loaded_draft_for = storage_key
 
@@ -285,6 +374,8 @@ def save_draft():
         "fp": st.session_state.get("fp_in", ""),
         "tip_status": st.session_state.get("tip_status", "No"),
         "tip_amt": st.session_state.get("tip_amt", ""),
+        "opening": st.session_state.get("opening_in", ""),
+        "handover": st.session_state.get("handover_in", ""),
         "expenses": st.session_state.expenses,
     }
     localS.setItem(storage_key, json.dumps(payload), key=f"set_{storage_key}")
@@ -300,6 +391,39 @@ if st.session_state.get("needs_save"):
 
 def clear_draft():
     localS.deleteItem(storage_key, key=f"del_{storage_key}")
+
+# ---------- OPENING TILL BALANCE ----------
+# Fetched once per branch/date and parked in session_state. Streamlit reruns the
+# whole script on every keystroke, so reading the ledger inline would fire a
+# Sheets call per character typed and burn straight through the API quota.
+if st.session_state.get("opening_fetched_for") != storage_key:
+    st.session_state.carried_opening = fetch_opening_cash(branch, date_selected, daily_id)
+    st.session_state.opening_fetched_for = storage_key
+    # A draft already in progress wins — it may hold a deliberate override.
+    if st.session_state.carried_opening is not None and not st.session_state.get("opening_in"):
+        st.session_state.opening_in = str(st.session_state.carried_opening)
+
+st.subheader("🧰 Cash Till")
+carried_opening = st.session_state.get("carried_opening")
+opening_in = st.text_input(
+    "Opening Cash in Till", placeholder="PKR", key="opening_in", on_change=save_draft
+)
+opening_cash = parse_signed(opening_in)
+
+if carried_opening is None:
+    st.caption(
+        "No previous closing found for this branch. Count the till and enter what is "
+        "in it — from here on it carries forward on its own."
+    )
+elif opening_cash != carried_opening:
+    st.warning(
+        f"⚠️ Overriding the carried balance of PKR {carried_opening:,}. "
+        f"A difference of PKR {opening_cash - carried_opening:,} is not explained by any closing."
+    )
+else:
+    st.caption(f"↪️ Carried forward from the previous closing: PKR {carried_opening:,}")
+
+st.divider()
 
 # REVENUE SUMMARY
 st.subheader("💰 Revenue Summary")
@@ -347,9 +471,39 @@ st.divider()
 # Metrics & Tipping
 tip_status = st.radio("Credit Card Tips?", ["No", "Yes"], horizontal=True, key="tip_status", on_change=save_draft)
 cc_tips = parse_money(st.text_input("Tip Amount", key="tip_amt", on_change=save_draft)) if tip_status == "Yes" else 0
+
+handover_in = st.text_input(
+    "Cash Handover to Office",
+    placeholder="PKR — leave blank if nothing was sent",
+    key="handover_in",
+    on_change=save_draft,
+)
+handover = parse_money(handover_in)
+
 total_exp = sum(e["Amount"] for e in st.session_state.expenses)
-expected_cash = cash - total_exp - cc_tips
-st.metric("Final Cash in Hand", f"PKR {int(expected_cash):,}")
+
+# Tips get written to the Expenses tab as their own CC TIP row when the closing
+# is posted, so they belong inside this total. The ledger's Expenses column has
+# to tie exactly to a SUMIF over that tab; counting the tip on its own as well
+# would deduct it from the till twice.
+cash_out = total_exp + cc_tips
+closing_cash = opening_cash + cash - cash_out - handover
+
+m1, m2, m3 = st.columns(3)
+m1.metric("Opening Cash", f"PKR {opening_cash:,}")
+m2.metric("Paid Out", f"PKR {cash_out + handover:,}")
+m3.metric("Closing Cash in Till", f"PKR {closing_cash:,}")
+
+st.caption(
+    f"{opening_cash:,} opening  +  {cash:,} cash sales  −  {cash_out:,} expenses & tips"
+    f"  −  {handover:,} handover  =  **{closing_cash:,}**"
+)
+
+if closing_cash < 0:
+    st.error(
+        f"⚠️ Closing till is negative (PKR {closing_cash:,}). More went out than was "
+        "available — check the opening figure and the expense entries before posting."
+    )
 
 # ---------- FEATURE 2: "ARE YOU SURE?" CONFIRM BEFORE POSTING & PRINTING ----------
 if not st.session_state.confirm_pending:
@@ -360,7 +514,10 @@ if not st.session_state.confirm_pending:
             st.session_state.confirm_pending = True
             st.rerun()
 else:
-    st.warning(f"⚠️ Post closing **{daily_id}** — Cash in Hand: PKR {int(expected_cash):,}. This will save to Sheets and print the receipt. Continue?")
+    st.warning(
+        f"⚠️ Post closing **{daily_id}** — closing till PKR {int(closing_cash):,} "
+        f"(opened at PKR {int(opening_cash):,}). This will save to Sheets and print the receipt. Continue?"
+    )
     col_yes, col_no = st.columns(2)
     confirmed = col_yes.button("✅ Yes, Post & Print", use_container_width=True)
     cancelled = col_no.button("❌ Cancel", use_container_width=True)
@@ -372,16 +529,22 @@ else:
 
         if upsert_closing(branch, daily_id, rows) and upsert_sales_data(
             branch, daily_id, date_str_sheet, cash, card, fp, gross, cc_tips
+        ) and upsert_cash_ledger(
+            branch, daily_id, date_str_sheet, opening_cash, cash, cash_out, handover, closing_cash
         ):
             st.success(f"Successfully posted! ID: {daily_id}")
             trigger_thermal_print(
                 branch=branch, date_display=date_str_display, cash_sales=cash, card_sales=card,
                 fp_sales=fp, cc_tips=cc_tips, expenses=st.session_state.expenses,
-                expected_cash=expected_cash, closing_code=daily_id,
+                expected_cash=closing_cash, closing_code=daily_id,
+                opening_cash=opening_cash, handover=handover,
             )
             st.session_state.expenses = []
             clear_draft()
             st.session_state.confirm_pending = False
+            # Force the next load to re-read the ledger so tomorrow opens on the
+            # balance this closing just wrote, not on a stale cached figure.
+            st.session_state.opening_fetched_for = None
             # NOTE: no st.rerun() here on purpose — the receipt component needs
             # ~500ms for its embedded script to fire window.print() before the
             # page rerenders. Forcing an immediate rerun tears down that
